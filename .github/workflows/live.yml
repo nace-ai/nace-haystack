@@ -1,0 +1,43 @@
+name: Live
+
+# Live checks against prod Drex (console.nace.ai) and OpenRouter, with synthetic data only.
+on:
+  pull_request:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    # Pull requests from forks get no secrets, so the live tests can only run on this repository's own branches
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # hatch-vcs derives the package version from git tags, so it needs full history
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Live tests
+        env:
+          NACE_API_KEY: ${{ secrets.NACE_API_KEY_LIVE }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY_LIVE }}
+        run: |
+          # Without the key every live test would be skipped and the job would pass without checking anything
+          if [ -z "$NACE_API_KEY" ]; then echo "::error::The NACE_API_KEY_LIVE secret is not set"; exit 1; fi
+          hatch run test:integration

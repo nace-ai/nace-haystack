@@ -1,0 +1,16 @@
+loaders:
+  - modules:
+      - haystack_integrations.components.routers.nace.text_router
+      - haystack_integrations.components.classifiers.nace.document_classifier
+      - haystack_integrations.components.evaluators.nace.faithfulness
+      - haystack_integrations.components.evaluators.nace.context_relevance
+    search_path: [../src]
+processors:
+  - type: filter
+    documented_only: true
+    skip_empty_modules: true
+renderer:
+  description: Nace integration for Haystack
+  id: integrations-nace
+  filename: nace.md
+  title: Nace

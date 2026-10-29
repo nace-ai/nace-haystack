@@ -1,0 +1,56 @@
+components:
+  classifier:
+    init_parameters:
+      api_base_url: null
+      api_key:
+        env_vars:
+        - NACE_API_KEY
+        strict: true
+        type: env_var
+      classification_field: null
+      max_retries: null
+      max_workers: 3
+      metadata_field: typesafe
+      model: drex-max-v1.1
+      questions:
+        department:
+          criteria:
+            billing: null
+            sales: null
+            technical: null
+          instructions: Which department should handle this ticket?
+          type: choice
+        refund:
+          instructions: Is the customer asking for a refund?
+          type: noul
+        urgency:
+          criteria:
+          - can wait
+          - this week
+          - today
+          instructions: How urgent is this ticket?
+          type: score
+      raise_on_failure: false
+      timeout: null
+    type: haystack_integrations.components.classifiers.nace.document_classifier.NaceDocumentClassifier
+  router:
+    init_parameters:
+      api_base_url: null
+      api_key:
+        env_vars:
+        - NACE_API_KEY
+        strict: true
+        type: env_var
+      instructions: Which team should handle this support request?
+      labels:
+        billing: Payments, invoices, refunds and charges
+        technical: Bugs, crashes and errors in the product
+      max_retries: null
+      min_confidence: 0.6
+      model: drex-max-v1.1
+      timeout: null
+    type: haystack_integrations.components.routers.nace.text_router.NaceTextRouter
+connection_type_validation: true
+connections: []
+max_runs_per_component: 100
+metadata: {}

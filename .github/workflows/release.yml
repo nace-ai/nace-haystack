@@ -1,0 +1,100 @@
+# Publishes nace-haystack to PyPI when a `v*` tag is pushed.
+#
+# Releasing is deliberate: `git tag v0.1.0 && git push origin v0.1.0`. A PyPI upload can't be undone or replaced,
+# so everything that can be checked runs before the upload. `workflow_dispatch` runs the same checks and the build
+# but skips the publish, so the release can be rehearsed.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel: a half-finished release is worse than a queued one.
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # hatch-vcs derives the package version from the tag, so it needs full history
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Lint, type check and unit tests
+        run: |
+          hatch run fmt-check
+          hatch run test:types
+          hatch run test:unit
+
+      - name: Build distributions
+        run: hatch build
+
+      # The tag names the version users will get. A shallow clone or a missing tag would build 0.0.0 or a .dev
+      # version instead, which must never reach PyPI.
+      - name: Tag matches the built version
+        if: github.event_name == 'push'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/nace_haystack-${version}-py3-none-any.whl" ]; then
+            echo "Tag ${GITHUB_REF_NAME} should build nace_haystack-${version}, but dist/ has:" >&2
+            ls dist >&2
+            exit 1
+          fi
+          echo "Releasing nace-haystack ${version}"
+
+      # The README becomes the PyPI project page; twine rejects markup PyPI can't render
+      - name: Check distribution metadata
+        run: pipx run twine check dist/*
+
+      - name: Install the wheel in a clean environment and import it
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/python -c "
+          from haystack_integrations.components.classifiers.nace import NaceDocumentClassifier
+          from haystack_integrations.components.evaluators.nace import NaceContextRelevanceEvaluator, NaceFaithfulnessEvaluator
+          from haystack_integrations.components.routers.nace import NaceTextRouter
+          "
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: verify
+    # Only a tag publishes; workflow_dispatch stops after verify.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Half of the Trusted Publishing identity configured on PyPI
+    environment: pypi
+    permissions:
+      # Trusted Publishing mints a short-lived token from this; no PyPI credential is stored in the repository
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

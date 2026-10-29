@@ -1,0 +1,50 @@
+[
+  {
+    "id": "e1",
+    "subject": "Charged twice for invoice INV-1042, refund needed today",
+    "body": "Hello, I was charged twice for invoice INV-1042, once on March 3 and again on March 5. Each charge was $4,212.00, so I have been billed an extra $4,212.00 for a single invoice. I have attached a scan of the invoice with both payment dates noted on it. Could you please refund the duplicate payment today? Thank you, Alex Example",
+    "attachment": "scanned_invoice.png"
+  },
+  {
+    "id": "e2",
+    "subject": "Refund request for renewal after cancellation",
+    "body": "Hi, we cancelled our annual subscription on February 14 because our team moved to a different tool, and we received a written confirmation the same day. The renewal invoice was still issued and paid on February 20, and we only noticed it this week. Could you refund the renewal amount to the original payment method? Thanks, Jamie Sample",
+    "attachment": null
+  },
+  {
+    "id": "e3",
+    "subject": "Question about the sales tax line on my latest invoice",
+    "body": "Hello, my latest invoice has a sales tax line that was not on the previous one, and I would like to understand how it was calculated. Could you confirm which tax rate was applied and whether our tax exemption number is recorded on the account? Our finance team closes the books on Friday, so a reply by Thursday would be very helpful. Best regards, Morgan Demo",
+    "attachment": null
+  },
+  {
+    "id": "e4",
+    "subject": "Production down: app crashes on launch for everyone",
+    "body": "Since about 8:40 this morning the app crashes right after launch for every user on our team, in both the desktop client and the web version. The public status page shows no incident, and our customers cannot reach their dashboards, so this is blocking our work today. Please treat this as a production outage and reply here as soon as someone picks it up. Thanks, Sam Mock",
+    "attachment": null
+  },
+  {
+    "id": "e5",
+    "subject": "Several users locked out with an invalid session error",
+    "body": "Since yesterday afternoon, several people on our sales team cannot sign in. They enter the correct password but get an 'invalid session' error and are sent back to the login screen. Two of them could sign in after clearing their browser cookies, but that is not a reliable workaround. Could you check whether this is related to the single sign-on change from last week? Thanks, Quinn Placeholder",
+    "attachment": null
+  },
+  {
+    "id": "e6",
+    "subject": "CSV export on the Reports page is missing the region column",
+    "body": "Since last week's update, the CSV export from the Reports page no longer includes the region column. The other columns export correctly, and we are filling in the region values by hand for now. There is no rush, but it would help to know whether a fix is planned for this month. Thanks, Riley Testcase",
+    "attachment": null
+  },
+  {
+    "id": "e7",
+    "subject": "Pricing for 50 seats on an annual contract",
+    "body": "Hello, we are evaluating the platform for a support team of about 50 agents, and we would like a quote for 50 seats on an annual contract. Could you also tell us whether volume discounts apply above 40 seats, and what the main differences are between the Team and Business plans? We expect to make a decision before the end of next quarter. Best, Casey Fictional",
+    "attachment": null
+  },
+  {
+    "id": "e8",
+    "subject": "Request for a product demo next week",
+    "body": "Hi, our operations lead read about the decision model API and would like to see a live demo. Could you offer a 30-minute call with our team next week, preferably on Tuesday or Wednesday afternoon? We are on UTC+1, so please send two or three time options to taylor@example.com. Thank you, Taylor Dummy",
+    "attachment": null
+  }
+]

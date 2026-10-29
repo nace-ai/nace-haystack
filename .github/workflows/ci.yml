@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+        # haystack-core-integrations tests on Windows and macOS too, at the oldest and newest Python
+        include:
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.15"
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.15"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # hatch-vcs derives the package version from git tags, so it needs full history
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Lint and format check
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: hatch run fmt-check
+
+      - name: Type check
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: hatch run test:types
+
+      - name: Unit tests
+        run: hatch run test:unit
+
+  lowest-direct:
+    name: Lowest direct dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      # The floors in pyproject.toml are promises to users who already have older versions installed
+      - name: Unit tests with the lowest direct dependencies
+        run: |
+          hatch run uv pip compile pyproject.toml --resolution lowest-direct --output-file requirements_lowest_direct.txt
+          hatch -e test env run -- uv pip install -r requirements_lowest_direct.txt
+          hatch run test:unit
