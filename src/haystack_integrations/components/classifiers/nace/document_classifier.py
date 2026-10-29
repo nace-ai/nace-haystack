@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2022-present deepset GmbH <info@deepset.ai>
 # SPDX-FileCopyrightText: 2026-present Nace AI
 #
 # SPDX-License-Identifier: Apache-2.0

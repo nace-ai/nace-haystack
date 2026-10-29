@@ -200,3 +200,7 @@ Drex's own guide covers the API side: [Migrate from TypeSafe](https://console.na
 ## License
 
 Apache-2.0
+
+The router, document classifier and their tests are adapted from deepset's Apache-2.0-licensed
+[`typesafe-haystack` integration](https://github.com/deepset-ai/haystack-core-integrations/tree/main/integrations/typesafe).
+The original deepset copyright notices are retained alongside Nace's notices for its modifications.
