@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import time
 from concurrent.futures import wait
 
@@ -71,3 +72,20 @@ def test_completed_failure_is_checked_before_refilling_workers(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         map_in_threads(work, [0, 1, 2, 3], max_workers=2)
     assert sorted(started) == [0, 1]
+
+
+async def test_async_workers_keep_order_and_bound_concurrency():
+    active = 0
+    peak = 0
+
+    async def work(item):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return item * 2
+
+    assert await concurrency.map_async(work, [3, 1, 2], 2) == [6, 2, 4]
+    assert peak == 2
+    assert await concurrency.map_async(work, [], 2) == []

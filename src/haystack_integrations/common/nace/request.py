@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any, TypeAlias
 
+import httpx
 import nace_sdk
 from pydantic import BaseModel, ConfigDict
 
@@ -31,6 +33,34 @@ class DrexResponse(BaseModel):
     model: str | None = None
     answers: dict[str, dict[str, Any]]
     usage: dict[str, Any] | None = None
+
+
+def require_answers(response: DrexResponse, question_ids: Sequence[str], *, probabilities: Sequence[str] = ()) -> None:
+    """
+    Validates required answers while retaining extra fields and future answer types.
+
+    :param response: The parsed backend response.
+    :param question_ids: Answers that must be present for this request to succeed.
+    :param probabilities: Answers the caller consumes as `noul` probabilities.
+    :raises nace_sdk.NaceAPIResponseValidationError: If required data is missing or invalid.
+    """
+    for question_id in question_ids:
+        answer = response.answers.get(question_id)
+        field = f"answers.{question_id}"
+        if answer is not None:
+            if answer.get("type") != "noul" and question_id not in probabilities:
+                continue
+            value = answer.get("noul")
+            if (
+                answer.get("type") == "noul"
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and 0 <= value <= 1
+                and math.isfinite(value)
+            ):
+                continue
+            field += ".noul"
+        raise nace_sdk.NaceAPIResponseValidationError(200, response.model_dump(), httpx.Headers(), field)
 
 
 def _as_dict(question: Any) -> Any:

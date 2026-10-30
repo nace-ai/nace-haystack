@@ -24,9 +24,15 @@ from haystack_integrations.common.nace.client import (
     provider_name,
     resolve_base_url,
 )
-from haystack_integrations.common.nace.concurrency import map_in_threads
+from haystack_integrations.common.nace.concurrency import map_async, map_in_threads
 from haystack_integrations.common.nace.errors import readable_error
-from haystack_integrations.common.nace.request import DrexResponse, Question, build_call, validate_questions
+from haystack_integrations.common.nace.request import (
+    DrexResponse,
+    Question,
+    build_call,
+    require_answers,
+    validate_questions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +245,7 @@ class NaceDocumentClassifier:
             A copy of the document with the answers under `meta[metadata_field]` and no `classification_error`, and
             `True` to mark it as classified.
         """
+        require_answers(response, list(self.questions))
         # Answers are the JSON Drex sent, so they stay serializable and keep fields added in later Drex releases
         meta = {key: value for key, value in document.meta.items() if key != _ERROR_FIELD}
         return replace(document, meta={**meta, self.metadata_field: response.answers}), True
@@ -281,13 +288,11 @@ class NaceDocumentClassifier:
             return replace(document, meta={**document.meta, _ERROR_FIELD: "Document has no text to classify."}), False
         try:
             response = client.system_one(**self._call(text))
+            return self._succeed(document=document, response=response)
         except nace_sdk.NaceError as error:
             return self._fail(document, error)
-        return self._succeed(document=document, response=response)
 
-    async def _classify_async(
-        self, client: nace_sdk.AsyncNaceClient, document: Document, semaphore: asyncio.Semaphore
-    ) -> tuple[Document, bool]:
+    async def _classify_async(self, client: nace_sdk.AsyncNaceClient, document: Document) -> tuple[Document, bool]:
         """
         Asynchronously sends one document to Drex and adds the answers to a copy of it.
 
@@ -295,8 +300,6 @@ class NaceDocumentClassifier:
             The asynchronous Nace client.
         :param document:
             The document to classify.
-        :param semaphore:
-            Limits how many requests run at once.
         :returns:
             A copy of the document with the answers under `meta[metadata_field]` and `True`, or a copy with the reason
             under `meta["classification_error"]` and `False` if the document has no text or its request failed.
@@ -307,11 +310,10 @@ class NaceDocumentClassifier:
         if not text:
             return replace(document, meta={**document.meta, _ERROR_FIELD: "Document has no text to classify."}), False
         try:
-            async with semaphore:
-                response = await client.system_one(**self._call(text))
+            response = await client.system_one(**self._call(text))
+            return self._succeed(document=document, response=response)
         except nace_sdk.NaceError as error:
             return self._fail(document, error)
-        return self._succeed(document=document, response=response)
 
     @component.output_types(documents=list[Document], failed_documents=list[Document])
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
@@ -371,20 +373,8 @@ class NaceDocumentClassifier:
         assert self._async_client is not None  # noqa: S101  # mypy: the client is created by warm_up_async above
 
         # Bound concurrency to max_workers, mirroring the ThreadPoolExecutor in the sync `run`
-        semaphore = asyncio.Semaphore(self.max_workers)
-        tasks = [
-            asyncio.create_task(self._classify_async(client=self._async_client, document=document, semaphore=semaphore))
-            for document in documents
-        ]
-        try:
-            results = await asyncio.gather(*tasks)
-        except Exception:
-            # We only expect to get here when `raise_on_failure` is `True`, since `_classify_async` otherwise records a
-            # failed request in `failed_documents` instead of raising. Cancel the remaining requests before re-raising.
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
+        client = self._async_client
+        results = await map_async(lambda document: self._classify_async(client, document), documents, self.max_workers)
         return {
             "documents": [document for document, succeeded in results if succeeded],
             "failed_documents": [document for document, succeeded in results if not succeeded],

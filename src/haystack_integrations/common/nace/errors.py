@@ -42,7 +42,9 @@ def readable_error(error: nace_sdk.NaceError, provider: str, *, image_types: Seq
         error.status,
         error.body,
         error.headers,
-        message=f"from {provider}: {_describe(error, provider, message, issues, image_types)}",
+        message=_shorten(
+            f"from {provider}: {_describe(error, provider, message, issues, image_types)}", provider, error.status
+        ),
     )
     readable.idempotency_key = error.idempotency_key
     return readable
