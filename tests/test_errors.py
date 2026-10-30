@@ -63,7 +63,7 @@ def test_402_names_billing():
     error = readable_error(sdk_error(402, {"error": {"message": "no available funds"}}), "Drex")
     assert isinstance(error, nace_sdk.NaceInsufficientCreditError)
     assert f"Add funds at {BILLING_URL}" in str(error)
-    assert BILLING_URL == "https://console.nace.ai/billing"
+    assert BILLING_URL == "https://console.nace.ai/dashboard/billing"
 
 
 def test_openrouter_prefix_and_unwrap():

@@ -48,7 +48,7 @@ class NaceFaithfulnessEvaluator(_NaceEvaluator):
         *,
         instructions: str = FAITHFULNESS_INSTRUCTIONS,
         model: str = DEFAULT_MODEL,
-        api_key: Secret = Secret.from_env_var("NACE_API_KEY"),
+        api_key: Secret | None = None,
         api_base_url: str | None = None,
         timeout: float | None = None,
         max_retries: int | None = None,
@@ -64,7 +64,7 @@ class NaceFaithfulnessEvaluator(_NaceEvaluator):
         :param model:
             The Drex model to use. Defaults to the newest Drex model; pin it in production.
         :param api_key:
-            The Nace API key.
+            A provider key. Defaults to `NACE_API_KEY` on Nace production origins; required for custom hosts.
         :param api_base_url:
             Base URL of the API. If `None`, the `NACE_BASE_URL` environment variable is used, or
             `https://console.nace.ai` if it is unset.

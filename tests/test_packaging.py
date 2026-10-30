@@ -17,10 +17,10 @@ APACHE_HEADER = [
 
 def test_every_source_file_has_the_apache_header():
     for path in [*ROOT.glob("src/**/*.py"), *ROOT.glob("tests/**/*.py")]:
-        head = path.read_text(encoding="utf-8").splitlines()[:3]
+        head = path.read_text(encoding="utf-8").splitlines()[:5]
         if not head:  # an empty __init__.py
             continue
-        assert head == APACHE_HEADER, path
+        assert "\n".join(APACHE_HEADER) in "\n".join(head), path
 
 
 def test_pydantic_is_a_declared_dependency():
@@ -38,7 +38,7 @@ def test_sdist_ships_only_the_package_and_its_tests():
     assert "src/haystack_integrations/components/routers/nace/text_router.py" in shipped
 
 
-def test_license_names_nace_as_the_copyright_holder():
+def test_license_retains_both_copyright_holders():
     text = (ROOT / "LICENSE.txt").read_text(encoding="utf-8")
     assert "Copyright 2026-present Nace AI" in text
-    assert "deepset" not in text
+    assert "Copyright 2023-present deepset GmbH" in text

@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2022-present deepset GmbH <info@deepset.ai>
 # SPDX-FileCopyrightText: 2026-present Nace AI
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -79,7 +80,7 @@ class TestInit:
         assert component.questions == QUESTIONS
         assert component.model == "drex-max-v1.1"
         assert component.api_key == Secret.from_env_var("NACE_API_KEY")
-        assert component.api_base_url is None
+        assert component.api_base_url == "https://console.nace.ai"
         assert component.metadata_field == "nace"
         assert component._client is None
         assert component._async_client is None
@@ -180,7 +181,11 @@ class TestWarmUp:
     @patch("haystack_integrations.components.classifiers.nace.document_classifier.make_client")
     def test_warm_up(self, mock_make_client):
         component = NaceDocumentClassifier(
-            questions=QUESTIONS, api_base_url="https://drex.example.com", timeout=90.0, max_retries=5
+            questions=QUESTIONS,
+            api_key=Secret.from_token("test-key"),
+            api_base_url="https://drex.example.com",
+            timeout=90.0,
+            max_retries=5,
         )
         component.warm_up()
         component.warm_up()

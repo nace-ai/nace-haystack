@@ -1,3 +1,4 @@
+# SPDX-FileCopyrightText: 2022-present deepset GmbH <info@deepset.ai>
 # SPDX-FileCopyrightText: 2026-present Nace AI
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -15,6 +16,7 @@ from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import (
     DEFAULT_MODEL,
+    bind_credentials,
     client_options,
     is_openrouter,
     make_async_client,
@@ -93,7 +95,7 @@ class NaceDocumentClassifier:
         questions: dict[str, Question],
         *,
         model: str = DEFAULT_MODEL,
-        api_key: Secret = Secret.from_env_var("NACE_API_KEY"),
+        api_key: Secret | None = None,
         api_base_url: str | None = None,
         classification_field: str | None = None,
         metadata_field: str = "nace",
@@ -113,7 +115,7 @@ class NaceDocumentClassifier:
             The Drex model to use. Defaults to the newest Drex model; pin a model such as `"drex-max-v1.1"` or
             `"drex-v2.0"` in production. `drex-v2.0` reads text only and bills fewer tokens on short texts.
         :param api_key:
-            The Nace API key.
+            A provider key. Defaults to `NACE_API_KEY` on Nace production origins; required for custom hosts.
         :param api_base_url:
             Base URL of the API. If `None`, the `NACE_BASE_URL` environment variable is used, or
             `https://console.nace.ai` if it is unset.
@@ -143,8 +145,7 @@ class NaceDocumentClassifier:
 
         self.questions = questions
         self.model = model
-        self.api_key = api_key
-        self.api_base_url = api_base_url
+        self.api_key, self.api_base_url = bind_credentials(api_key, api_base_url)
         self.classification_field = classification_field
         self.metadata_field = metadata_field
         self.timeout = timeout

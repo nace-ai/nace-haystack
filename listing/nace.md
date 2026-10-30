@@ -48,7 +48,7 @@ Both take many questions in one request; see [Drex's limits](https://console.nac
 
 Prices are per input token and differ by model (output is free); see [Drex pricing](https://console.nace.ai/docs/drex/reference/pricing). The default model changes when Drex releases a new one, and a new model can shift probabilities, so pin `model=` if your pipeline relies on thresholds.
 
-To use the hosted models, you'll need an API key from the [Nace console](https://console.nace.ai). Add it as an environment variable, `NACE_API_KEY`. To use a different API host, set `NACE_BASE_URL`. For more information, see [the Drex docs](https://console.nace.ai/docs).
+To use the hosted models, you'll need an API key from the [Nace console](https://console.nace.ai). Add it as an environment variable, `NACE_API_KEY`. To use a different API host, set `api_base_url` (or `NACE_BASE_URL` before constructing the component) and pass an explicit provider key through `api_key=Secret.from_env_var("PROVIDER_API_KEY")`. Set `PROVIDER_API_KEY` to that provider's key; `NACE_API_KEY` is reserved for Nace's production API. The destination is saved with the component, so changing the environment later does not redirect an existing component. For more information, see [the Drex docs](https://console.nace.ai/docs).
 
 Drex is also available through OpenRouter. Set `api_base_url="https://openrouter.ai/api/v1"`, set `model` to an OpenRouter model ID such as `nace-ai/drex-max`, and pass your OpenRouter key as `api_key`, for example `Secret.from_env_var("OPENROUTER_API_KEY")`.
 

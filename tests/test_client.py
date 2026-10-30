@@ -52,7 +52,7 @@ def test_is_text_only(model, expected):
 class TestBaseUrl:
     def test_blank_env_base_url_means_default(self, monkeypatch):
         monkeypatch.setenv("NACE_BASE_URL", "  ")
-        assert resolve_base_url(None) is None
+        assert resolve_base_url(None) == "https://console.nace.ai"
 
     def test_env_base_url_used_when_no_argument(self, monkeypatch):
         monkeypatch.setenv("NACE_BASE_URL", "https://drex.example.com")
@@ -64,6 +64,8 @@ class TestBaseUrl:
         assert resolve_base_url("https://openrouter.ai/api/v1") == "https://openrouter.ai/api"
         assert is_openrouter("https://openrouter.ai/api")
         assert provider_name("https://openrouter.ai/api") == "OpenRouter"
+        assert not is_openrouter("https://notopenrouter.ai/api")
+        assert is_openrouter("https://OPENROUTER.AI./api")
         assert not is_openrouter(None)
         assert provider_name(None) == "Drex"
 
@@ -73,7 +75,7 @@ class TestClientOptions:
         monkeypatch.delenv("NACE_BASE_URL", raising=False)
         options = client_options(api_key, None, None, None)
         assert options["api_key"] == "nace_sk_test"
-        assert options["base_url"] is None
+        assert options["base_url"] == "https://console.nace.ai"
         assert options["timeout"] == 60.0
         assert options["client_info"] == CLIENT_NAME
         assert options["retry"].timeout is None
@@ -91,8 +93,8 @@ class TestClientOptions:
         assert "60" in warnings[0].getMessage()
         assert "55" in warnings[0].getMessage()
 
-    def test_openrouter_headers(self, api_key):
-        options = client_options(api_key, "https://openrouter.ai/api/v1", None, None)
+    def test_openrouter_headers(self):
+        options = client_options(Secret.from_token("provider-key"), "https://openrouter.ai/api/v1", None, None)
         assert options["base_url"] == "https://openrouter.ai/api"
         assert options["headers"]["HTTP-Referer"] == "https://nace.ai"
         assert options["headers"]["X-OpenRouter-Title"] == "Drex for Haystack"

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bind the default Nace credential to Nace's HTTPS production origins. Custom providers now require an explicit
+  provider key; saved pipelines pin their destination, empty keys are refused, and OpenRouter host matching is exact.
+- Strip ambient Vercel bypass headers on other providers and refuse cross-origin redirects in sync and async clients.
+- Check all completed batch requests for failures before starting replacements. Requests already in flight may finish.
+- Restore deepset copyright notices in components and tests adapted from its TypeSafe integration, with source attribution.
+- Point insufficient-credit errors to the working `/dashboard/billing` page.
+
 ## [0.1.0] - 2026-10-29
 
 First release.

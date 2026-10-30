@@ -241,8 +241,30 @@ images first.
 
 ## Other backends
 
-Set `api_base_url` to use Drex through [OpenRouter](https://openrouter.ai) (`https://openrouter.ai/api/v1`, with
-model IDs such as `nace-ai/drex-max`) or another TypeSafe-compatible host. OpenRouter takes inline images only.
+Set `api_base_url` and an explicit provider key to use Drex through [OpenRouter](https://openrouter.ai) or another
+TypeSafe-compatible host. OpenRouter takes inline images only.
+
+```python
+from haystack.utils import Secret
+from haystack_integrations.components.routers.nace import NaceTextRouter
+
+router = NaceTextRouter(
+    labels=["billing", "technical"],
+    model="nace-ai/drex-max",
+    api_base_url="https://openrouter.ai/api/v1",
+    api_key=Secret.from_env_var("OPENROUTER_API_KEY"),
+)
+```
+
+Set `OPENROUTER_API_KEY` in your environment before running the router. Use a separate provider environment
+variable for other hosts; `NACE_API_KEY` is reserved for Nace's production API. Custom destinations require an
+explicit `api_key`, and an empty key is refused before a request is sent. Ambient Vercel bypass headers are
+removed from requests to other providers, and redirects to a different origin are refused.
+
+The base URL is resolved when the component is constructed, then saved with the pipeline. Changing
+`NACE_BASE_URL` later does not redirect an existing component. To change providers in a saved pipeline, update
+both its base URL and its provider key reference. Older saved pipelines that send `NACE_API_KEY` to a custom
+host must switch to a separate provider key reference before loading.
 
 ## Errors and retries
 
@@ -303,3 +325,7 @@ Drex's own guide covers the API side: [Migrate from TypeSafe](https://console.na
 ## License
 
 Apache-2.0
+
+The router, document classifier and their tests are adapted from deepset's Apache-2.0-licensed
+[`typesafe-haystack` integration](https://github.com/deepset-ai/haystack-core-integrations/tree/main/integrations/typesafe).
+The original deepset copyright notices are retained alongside Nace's notices for its modifications.

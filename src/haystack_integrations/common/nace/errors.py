@@ -9,7 +9,7 @@ from typing import Any
 
 import nace_sdk
 
-BILLING_URL = "https://console.nace.ai/billing"
+BILLING_URL = "https://console.nace.ai/dashboard/billing"
 OPENROUTER_CREDITS_URL = "https://openrouter.ai/settings/credits"
 
 # Longer messages are cut, so an unexpected response body can't flood logs and tracebacks

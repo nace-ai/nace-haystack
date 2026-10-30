@@ -11,6 +11,7 @@ from haystack import default_to_dict, logging
 from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import (
+    bind_credentials,
     client_options,
     is_openrouter,
     make_async_client,
@@ -43,7 +44,7 @@ class _NaceEvaluator:
         *,
         instructions: str,
         model: str,
-        api_key: Secret,
+        api_key: Secret | None,
         api_base_url: str | None,
         timeout: float | None,
         max_retries: int | None,
@@ -55,8 +56,7 @@ class _NaceEvaluator:
             raise ValueError(msg)
         self.instructions = instructions
         self.model = model
-        self.api_key = api_key
-        self.api_base_url = api_base_url
+        self.api_key, self.api_base_url = bind_credentials(api_key, api_base_url)
         self.timeout = timeout
         self.max_retries = max_retries
         self.max_workers = max_workers
