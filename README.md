@@ -269,7 +269,9 @@ host must switch to a separate provider key reference before loading.
 ## Errors and retries
 
 Requests that hit a rate limit (429) or an overloaded model (529) are retried, waiting as long as Drex asks. Other
-errors are raised as nace-sdk's error classes with a readable message, for example:
+errors are raised as nace-sdk's error classes with a readable message. The `message` is capped at 500 characters,
+with space reserved for recovery guidance. The SDK adds the status and request ID when rendering the exception;
+the original structured body and issues remain available for inspection. For example:
 
 ```text
 422 from Drex: the request is invalid

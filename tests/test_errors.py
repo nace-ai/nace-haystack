@@ -174,3 +174,25 @@ def test_structured_issues_have_a_total_display_budget(issues):
     assert rewritten.message.endswith("…")
     assert rewritten.body == original.body
     assert rewritten.issues == original.issues
+
+
+@pytest.mark.parametrize(
+    ("status", "provider", "hint"),
+    [
+        (404, "Drex", "https://provider.example/v1/system-one"),
+        (405, "Drex", "https://provider.example/v1/system-one"),
+        (402, "Drex", BILLING_URL),
+        (402, "OpenRouter", OPENROUTER_CREDITS_URL),
+    ],
+)
+@pytest.mark.parametrize("structured", [False, True])
+def test_long_errors_keep_recovery_guidance(status, provider, hint, structured):
+    body = {"error": {"message": "invalid" if structured else "x" * 1000}}
+    if structured:
+        body["error"]["issues"] = [{"path": "q", "message": "x" * 1000}]
+    original = sdk_error(status, body, {"x-request-id": "request-for-support"})
+    original.endpoint = "https://provider.example/v1/system-one"
+    rewritten = readable_error(original, provider)
+    assert hint in rewritten.message
+    assert len(rewritten.message) <= 500
+    assert rewritten.request_id == original.request_id
