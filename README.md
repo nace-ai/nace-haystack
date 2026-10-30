@@ -1,3 +1,15 @@
+<p>
+  <a href="https://nace.ai"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nace-ai/nace-haystack/f132af39032d7ec08180d97a7768f574ff098a7c/assets/nace-dark.svg">
+    <img src="https://raw.githubusercontent.com/nace-ai/nace-haystack/f132af39032d7ec08180d97a7768f574ff098a7c/assets/nace-light.svg" alt="Nace AI" height="56" align="middle">
+  </picture></a>
+  &nbsp;&nbsp; + &nbsp;&nbsp;
+  <a href="https://haystack.deepset.ai"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nace-ai/nace-haystack/f132af39032d7ec08180d97a7768f574ff098a7c/assets/haystack-dark.png">
+    <img src="https://raw.githubusercontent.com/nace-ai/nace-haystack/f132af39032d7ec08180d97a7768f574ff098a7c/assets/haystack-light.png" alt="Haystack by deepset" height="56" align="middle">
+  </picture></a>
+</p>
+
 # Drex for Haystack
 
 [Drex](https://console.nace.ai/docs) decision-model components for
