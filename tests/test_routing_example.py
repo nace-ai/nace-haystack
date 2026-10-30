@@ -12,7 +12,10 @@ import pytest
 from haystack_integrations.common.nace.client import make_client
 from haystack_integrations.components.routers.nace import text_router
 
+EXAMPLE = Path(__file__).parents[1] / "examples" / "route_with_fallback.py"
 
+
+@pytest.mark.skipif(not EXAMPLE.is_file(), reason="Example scripts are repository-only, excluded from source distributions.")
 @pytest.mark.parametrize(
     ("probabilities", "expected_queue"),
     [
@@ -48,7 +51,7 @@ def test_routing_example_hands_off_to_the_selected_queue(monkeypatch, probabilit
 
     transport = httpx.MockTransport(respond)
     monkeypatch.setattr(text_router, "make_client", lambda options: make_client({**options, "transport": transport}))
-    example = runpy.run_path(str(Path(__file__).parents[1] / "examples" / "route_with_fallback.py"))
+    example = runpy.run_path(str(EXAMPLE))
     pipeline = example["build_pipeline"]()
     try:
         result = example["route_ticket"](pipeline, "Please help with this request.")
