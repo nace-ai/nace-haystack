@@ -15,7 +15,9 @@ from haystack_integrations.components.routers.nace import text_router
 EXAMPLE = Path(__file__).parents[1] / "examples" / "route_with_fallback.py"
 
 
-@pytest.mark.skipif(not EXAMPLE.is_file(), reason="Example scripts are repository-only, excluded from source distributions.")
+@pytest.mark.skipif(
+    not EXAMPLE.is_file(), reason="Example scripts are repository-only, excluded from source distributions."
+)
 @pytest.mark.parametrize(
     ("probabilities", "expected_queue"),
     [
