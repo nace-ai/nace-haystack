@@ -161,7 +161,9 @@ class TestSerialization:
 class TestWarmUp:
     @patch("haystack_integrations.components.routers.nace.text_router.make_client")
     def test_warm_up(self, mock_make_client):
-        router = NaceTextRouter(labels=LABELS, api_base_url="https://drex.example.com", max_retries=5)
+        router = NaceTextRouter(
+            labels=LABELS, api_key=Secret.from_token("test-key"), api_base_url="https://drex.example.com", max_retries=5
+        )
         router.warm_up()
         router.warm_up()
         mock_make_client.assert_called_once()
@@ -273,7 +275,9 @@ class TestDrex:
         router._client.system_one.assert_not_called()
 
     def test_openrouter_needs_its_model_id(self):
-        router = NaceTextRouter(labels=LABELS, api_base_url="https://openrouter.ai/api/v1")
+        router = NaceTextRouter(
+            labels=LABELS, api_key=Secret.from_token("provider-key"), api_base_url="https://openrouter.ai/api/v1"
+        )
         router._client = MagicMock()
         with pytest.raises(ValueError, match="nace-ai/drex-max"):
             router.run(text="Hi")

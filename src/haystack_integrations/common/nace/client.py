@@ -5,7 +5,7 @@
 import os
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import nace_sdk
@@ -65,7 +65,7 @@ def is_openrouter(base_url: str | None) -> bool:
     :param base_url: The API base URL, or `None` for the default.
     :returns: `True` if the host is openrouter.ai.
     """
-    return bool(base_url) and (urlsplit(str(base_url)).hostname or "").endswith("openrouter.ai")
+    return bool(base_url) and (urlsplit(str(base_url)).hostname or "").lower().rstrip(".") == "openrouter.ai"
 
 
 def provider_name(base_url: str | None) -> str:
@@ -78,19 +78,64 @@ def provider_name(base_url: str | None) -> str:
     return "OpenRouter" if is_openrouter(base_url) else "Drex"
 
 
-def resolve_base_url(api_base_url: str | None) -> str | None:
+def resolve_base_url(api_base_url: str | None) -> str:
     """
-    Resolves the API base URL from the argument or the `NACE_BASE_URL` environment variable.
+    Resolves and validates the API destination, including `NACE_BASE_URL`.
 
-    :param api_base_url: The base URL passed to the component, or `None`.
-    :returns: The base URL, or `None` for the SDK default. A blank value (common in `.env` files and CI) means the
-        default. OpenRouter's documented `.../api/v1` is trimmed to `.../api`, because the SDK appends `/v1/...`.
+    :param api_base_url: An explicit base URL, or `None` to read the environment.
+    :returns: A concrete URL. OpenRouter's `/api/v1` is trimmed because the SDK adds `/v1`.
+    :raises ValueError: If the URL is not an absolute HTTP(S) URL without credentials, query or fragment.
     """
-    base_url = api_base_url if api_base_url is not None else os.environ.get("NACE_BASE_URL")
-    base_url = (base_url or "").strip() or None
-    if base_url and is_openrouter(base_url):
-        base_url = base_url.rstrip("/").removesuffix("/v1")
-    return base_url
+    raw = api_base_url if api_base_url is not None else os.environ.get("NACE_BASE_URL")
+    base_url = (raw or "").strip() or "https://console.nace.ai"
+    parts = urlsplit(base_url)
+    if (
+        parts.scheme not in {"http", "https"}
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+    ):
+        msg = "api_base_url must be an absolute HTTP(S) URL without credentials, query or fragment"
+        raise ValueError(msg)
+    # Accessing port also validates malformed and out-of-range ports.
+    port = parts.port
+    host = parts.hostname.lower().rstrip(".")
+    if ":" in host:
+        host = f"[{host}]"
+    netloc = host if port is None else f"{host}:{port}"
+    path = parts.path.rstrip("/")
+    if is_openrouter(base_url):
+        path = path.removesuffix("/v1")
+    return urlunsplit((parts.scheme, netloc, path, "", ""))
+
+
+def _is_nace_origin(url: str) -> bool:
+    parts = urlsplit(url)
+    return (
+        parts.scheme == "https" and parts.hostname in {"console.nace.ai", "drex.nace.ai"} and parts.port in {None, 443}
+    )
+
+
+def bind_credentials(api_key: Secret | None, api_base_url: str | None) -> tuple[Secret, str]:
+    """
+    Pins a component's destination and prevents implicit Nace credentials reaching other providers.
+
+    :param api_key: An explicit provider secret, or `None` for the ambient Nace key.
+    :param api_base_url: The destination, or `None` to resolve it from the environment.
+    :returns: The secret and concrete URL to keep together, including in saved pipelines.
+    :raises ValueError: If a custom destination would receive implicit Nace credentials.
+    """
+    base_url = resolve_base_url(api_base_url)
+    if not _is_nace_origin(base_url):
+        if api_key is None:
+            msg = "Custom API destinations require an explicit provider api_key"
+            raise ValueError(msg)
+        if api_key.type.value == "env_var" and "NACE_API_KEY" in api_key.to_dict()["env_vars"]:
+            msg = "NACE_API_KEY cannot be forwarded to a custom destination; use a separate provider api_key"
+            raise ValueError(msg)
+    return api_key if api_key is not None else Secret.from_env_var("NACE_API_KEY"), base_url
 
 
 def client_options(
@@ -105,7 +150,11 @@ def client_options(
     :param max_retries: Maximum number of retries after a failed attempt. `None` means the SDK default of 2.
     :returns: The client keyword arguments.
     """
-    base_url = resolve_base_url(api_base_url)
+    api_key, base_url = bind_credentials(api_key, api_base_url)
+    key_value = api_key.resolve_value()
+    if not key_value or not key_value.strip():
+        msg = "api_key must not be empty"
+        raise ValueError(msg)
     if timeout is None:
         timeout = MIN_TIMEOUT
     elif timeout < MIN_TIMEOUT:
@@ -123,7 +172,7 @@ def client_options(
     if max_retries is not None:
         retry_kwargs["max_retries"] = max_retries
     return {
-        "api_key": api_key.resolve_value(),
+        "api_key": key_value,
         "base_url": base_url,
         "timeout": timeout,
         "retry": CappedRetryPolicy(**retry_kwargs),
@@ -132,13 +181,15 @@ def client_options(
     }
 
 
-def _set_user_agent(request: httpx.Request) -> None:
-    # The SDK sends its own User-Agent; ours names this integration so traffic can be measured per channel.
+def _prepare_request(request: httpx.Request, base_url: str) -> None:
+    # Keep credentials bound to the configured origin, including when redirects are enabled by an HTTP client.
+    expected = httpx.URL(base_url)
+    if (request.url.scheme, request.url.host, request.url.port) != (expected.scheme, expected.host, expected.port):
+        msg = "Refusing to send credentials to a different API origin"
+        raise ValueError(msg)
+    if not _is_nace_origin(str(request.url)):
+        request.headers.pop("x-vercel-protection-bypass", None)
     request.headers["User-Agent"] = CLIENT_NAME
-
-
-async def _set_user_agent_async(request: httpx.Request) -> None:
-    _set_user_agent(request)
 
 
 def make_client(options: dict[str, Any]) -> nace_sdk.NaceClient:
@@ -149,8 +200,12 @@ def make_client(options: dict[str, Any]) -> nace_sdk.NaceClient:
     :returns: The client.
     """
     options = dict(options)
+
+    def prepare(request: httpx.Request) -> None:
+        _prepare_request(request, options["base_url"])
+
     http_client = httpx.Client(
-        timeout=options["timeout"], transport=options.pop("transport", None), event_hooks={"request": [_set_user_agent]}
+        timeout=options["timeout"], transport=options.pop("transport", None), event_hooks={"request": [prepare]}
     )
     return nace_sdk.NaceClient(**options, http_client=http_client)
 
@@ -163,9 +218,13 @@ def make_async_client(options: dict[str, Any]) -> nace_sdk.AsyncNaceClient:
     :returns: The client.
     """
     options = dict(options)
+
+    async def prepare(request: httpx.Request) -> None:
+        _prepare_request(request, options["base_url"])
+
     http_client = httpx.AsyncClient(
         timeout=options["timeout"],
         transport=options.pop("transport", None),
-        event_hooks={"request": [_set_user_agent_async]},
+        event_hooks={"request": [prepare]},
     )
     return nace_sdk.AsyncNaceClient(**options, http_client=http_client)

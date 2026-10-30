@@ -15,7 +15,7 @@ def map_in_threads(func: Callable[[T], R], items: Sequence[T], max_workers: int)
     Applies `func` to every item on up to `max_workers` threads and returns the results in input order.
 
     Unlike `Executor.map`, which notices a failure only once every earlier item is done, the first exception from
-    any item stops the run: no item starts after it, so no further requests are sent.
+    any completed item stops refilling the workers. Requests already in flight may still finish.
 
     :param func: The function to apply.
     :param items: The inputs.
@@ -26,8 +26,7 @@ def map_in_threads(func: Callable[[T], R], items: Sequence[T], max_workers: int)
     results: dict[int, R] = {}
     pending: dict[Future[R], int] = {}
     queue: Iterator[tuple[int, T]] = iter(enumerate(items))
-    # Items are handed out one at a time as workers free up, rather than queued all at once, so a worker can never
-    # pick up another item between a failure and the moment it is noticed
+    # Keep the queue here, rather than handing every item to the executor in advance.
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
 
         def start_next() -> None:
@@ -40,10 +39,11 @@ def map_in_threads(func: Callable[[T], R], items: Sequence[T], max_workers: int)
         while pending:
             done, _ = wait(pending, return_when=FIRST_COMPLETED)
             for future in done:
-                index = pending.pop(future)
                 error = future.exception()
                 if error is not None:
                     raise error
-                results[index] = future.result()
+            for future in done:
+                results[pending.pop(future)] = future.result()
+            for _ in done:
                 start_next()
     return [results[index] for index in range(len(items))]

@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import time
+from concurrent.futures import wait
 
 import pytest
 
+from haystack_integrations.common.nace import concurrency
 from haystack_integrations.common.nace.concurrency import map_in_threads
 
 
@@ -48,3 +50,24 @@ def test_map_in_threads_keeps_order():
 
 def test_map_in_threads_with_no_items():
     assert map_in_threads(lambda item: item, [], max_workers=3) == []
+
+
+def test_completed_failure_is_checked_before_refilling_workers(monkeypatch):
+    started = []
+
+    def work(item):
+        started.append(item)
+        if item == 1:
+            msg = "boom"
+            raise RuntimeError(msg)
+        return item
+
+    def successes_first(futures, **_kwargs):
+        done, pending = wait(futures)
+        # Both real workers have finished; iteration order must not allow success to hide the failure.
+        return sorted(done, key=lambda future: future.exception() is not None), pending
+
+    monkeypatch.setattr(concurrency, "wait", successes_first)
+    with pytest.raises(RuntimeError, match="boom"):
+        map_in_threads(work, [0, 1, 2, 3], max_workers=2)
+    assert sorted(started) == [0, 1]
