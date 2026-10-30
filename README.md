@@ -1,4 +1,4 @@
-# nace-haystack
+# Drex for Haystack
 
 [Drex](https://console.nace.ai/docs) decision-model components for
 [Haystack](https://github.com/deepset-ai/haystack), deepset's open-source Python framework for AI pipelines,
