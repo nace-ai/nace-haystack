@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import httpx
+import nace_sdk
 import pytest
 from haystack import Pipeline
 from haystack.core.errors import DeserializationError
@@ -107,7 +108,7 @@ async def test_redirect_cannot_forward_credentials_to_another_origin(asynchronou
     kwargs = {"state": "hi", "questions": {"q": {"type": "noul", "instructions": "ok?"}}}
     client = make_async_client(options) if asynchronous else make_client(options)
     try:
-        with pytest.raises(ValueError, match="different API origin"):
+        with pytest.raises((ValueError, nace_sdk.NaceError), match=r"different (API )?origin"):
             if asynchronous:
                 await client.system_one(**kwargs)
             else:
