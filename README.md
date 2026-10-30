@@ -1,6 +1,12 @@
 # nace-haystack
 
-Haystack components for [Drex](https://console.nace.ai/docs), Nace's decision models.
+[Drex](https://console.nace.ai/docs) decision-model components for
+[Haystack](https://github.com/deepset-ai/haystack), deepset's open-source Python framework for AI pipelines,
+agents, and retrieval-augmented generation (RAG). Maintained by [Nace AI](https://nace.ai).
+
+Haystack connects components for tasks such as retrieving documents, calling models, and routing results. This
+package adds Drex decisions and evaluators to those pipelines. Start with the
+[Haystack documentation](https://docs.haystack.deepset.ai/docs/intro) if you are new to the framework.
 
 Drex models don't generate text. They answer typed questions about a text, JSON or images in one request and return
 calibrated probabilities:
@@ -18,40 +24,93 @@ This package brings them to Haystack pipelines:
 | `NaceFaithfulnessEvaluator` | Judges whether answers are supported by their contexts, like Haystack's `FaithfulnessEvaluator` |
 | `NaceContextRelevanceEvaluator` | Judges whether retrieved contexts help answer the question, like `ContextRelevanceEvaluator` |
 
-The router and classifier mirror deepset's `typesafe-haystack` components for Jev, so a Jev pipeline switches to Drex
+The router and classifier mirror deepset's
+[`typesafe-haystack` integration](https://github.com/deepset-ai/haystack-core-integrations/tree/main/integrations/typesafe)
+for Jev, so a Jev pipeline switches to Drex
 with a few edits (see [Switching from TypeSafe](#switching-from-typesafe)).
 
 ## Installation
 
+Python 3.11 or later is required. Install the published package in a virtual environment:
+
 ```bash
-pip install nace-haystack
+python -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install nace-haystack
 ```
 
-Create an API key at [console.nace.ai](https://console.nace.ai) and set it as `NACE_API_KEY`.
+Create an API key at [console.nace.ai](https://console.nace.ai), then set it in your shell:
+
+```bash
+export NACE_API_KEY="your-nace-api-key"
+# Windows PowerShell: $env:NACE_API_KEY="your-nace-api-key"
+```
+
+The examples below call the hosted Drex API and consume your account's credit. Keep the key out of source code and
+notebook outputs. See [pricing](https://console.nace.ai/docs/drex/reference/pricing) for current rates.
 
 ## Usage
 
-### Route text
+### Quickstart: route one request
+
+Save this snippet as `route_text.py` and run `python route_text.py` in the environment above. This text-only example
+pins `drex-v2.0`; use `drex-max-v1.1` when you need images.
 
 ```python
 from haystack_integrations.components.routers.nace import NaceTextRouter
 
 router = NaceTextRouter(
+    model="drex-v2.0",
     labels={
         "billing": "Payments, invoices, refunds and charges",
         "technical": "Bugs, crashes and errors in the product",
     },
     instructions="Which team should handle this support request?",
     min_confidence=0.6,
+    include_probabilities=True,
 )
 
 print(router.run(text="I was charged twice for my subscription."))
-# {'billing': 'I was charged twice for my subscription.'}
+# Illustrative output; probabilities vary:
+# {'billing': 'I was charged twice for my subscription.',
+#  'probabilities': {'type': 'choice', 'choice': 'billing', 'confidence': 0.97,
+#                    'probabilities': {'billing': 0.97, 'technical': 0.03}}}
 ```
 
 Texts whose answer is less confident than `min_confidence` go to the `low_confidence` output, for a fallback such
 as an LLM or a person. With `include_probabilities=True`, a `probabilities` output carries the full answer, so
 thresholds stay in your pipeline.
+
+`choice` is the selected label, `confidence` is its probability, and `probabilities` contains every label's
+probability. A result of 0.97 is not a guarantee that the decision is correct. The 0.6 threshold is an example:
+choose your threshold using representative labeled inputs and the cost of a wrong route. Raise it when uncertain
+requests should go to review more often. Low confidence uses the fallback output; API failures raise an error
+rather than automatically using that output.
+
+### Connect the decision to a complete pipeline
+
+[Run the routing example](https://github.com/nace-ai/nace-haystack/blob/main/examples/route_with_fallback.py) to see
+all three outputs connected to downstream handlers:
+
+```text
+support request → Drex router → billing handler
+                             → technical handler
+                             → human-review handler (below the confidence threshold)
+```
+
+The example uses `Pipeline.add_component` and `Pipeline.connect`. Only the selected handler runs; it returns a
+`ticket` record naming its queue, alongside the original Drex probabilities. It does not send emails or create real
+tickets. Replace the handlers with your own actions in an application. The ambiguous sample may take different
+routes on different runs, depending on its confidence.
+
+The scripts and notebook use files from this repository, which are not installed by `pip install nace-haystack`.
+Clone the repo and run the example from its root:
+
+```bash
+git clone https://github.com/nace-ai/nace-haystack.git
+cd nace-haystack
+python examples/route_with_fallback.py
+```
 
 ### Classify documents
 
@@ -61,6 +120,7 @@ from haystack import Document
 from haystack_integrations.components.classifiers.nace import NaceDocumentClassifier
 
 classifier = NaceDocumentClassifier(
+    model="drex-v2.0",
     questions={
         "department": {
             "type": "choice",
@@ -90,7 +150,7 @@ Documents that can't be classified are returned in `failed_documents` with the r
 ```python
 from haystack_integrations.components.evaluators.nace import NaceFaithfulnessEvaluator
 
-evaluator = NaceFaithfulnessEvaluator()
+evaluator = NaceFaithfulnessEvaluator(model="drex-v2.0")
 result = evaluator.run(
     questions=["Who won the race?"],
     contexts=[["Ada won the 2026 city race."]],
@@ -101,7 +161,47 @@ print(result["score"], result["individual_scores"])
 
 Both evaluators take the same inputs and return the same outputs (`score`, `individual_scores`, `results`, `meta`) as
 Haystack's built-in LLM evaluators. Each item is one Drex request, and its score is the probability that the answer
-is faithful (or that the contexts are relevant).
+is faithful (or that the contexts are relevant). `score` is the mean over the successful items, while
+`individual_scores` keeps one value per item. If you set `raise_on_failure=False`, a failed item is NaN and is
+excluded from the mean; check `results` for errors before using an aggregate.
+
+To evaluate retrieval before generating an answer:
+
+```python
+from haystack_integrations.components.evaluators.nace import NaceContextRelevanceEvaluator
+
+evaluator = NaceContextRelevanceEvaluator(model="drex-v2.0")
+result = evaluator.run(
+    questions=["Who won the race?"],
+    contexts=[["Ada won the 2026 city race."]],
+)
+print(result["score"], result["individual_scores"])
+```
+
+### Run the full support-email example and cookbook
+
+The [support-email pipeline](https://github.com/nace-ai/nace-haystack/blob/main/examples/support_email_pipeline.py)
+classifies eight synthetic emails into document metadata, filters refund requests, routes emails and an invoice
+image, and checks draft replies against a refund policy. From the cloned repository root:
+
+```bash
+python -m pip install pillow
+python examples/support_email_pipeline.py
+```
+
+Pillow draws the synthetic invoice and shrinks large images. The example generates its own invoice file, so you do
+not need to upload a customer document.
+
+The [cookbook notebook](https://github.com/nace-ai/nace-haystack/blob/main/notebooks/nace_haystack_cookbook.ipynb)
+walks through the same workflow step by step. Launch Jupyter from the shell where `NACE_API_KEY` is set:
+
+```bash
+python -m pip install pillow jupyterlab
+python -m jupyterlab notebooks/nace_haystack_cookbook.ipynb
+```
+
+Select the virtual environment's Python kernel. The notebook reads sample files from the checkout; run it from the
+repository root or the `notebooks/` directory.
 
 ## Models
 
@@ -122,7 +222,10 @@ The router and the evaluators take images: `ImageContent`, `ByteStream`, or file
 ```python
 from haystack.dataclasses import ImageContent
 
+from haystack_integrations.components.routers.nace import NaceTextRouter
+
 router = NaceTextRouter(
+    model="drex-max-v1.1",
     labels={"invoice": "A bill or invoice", "receipt": "A proof of payment", "other": None},
     instructions="What kind of document is Image 1?",
 )
