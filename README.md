@@ -12,6 +12,9 @@
 
 # Drex for Haystack
 
+[![CI](https://img.shields.io/github/actions/workflow/status/nace-ai/nace-haystack/ci.yml?branch=main&label=CI&logo=github)](https://github.com/nace-ai/nace-haystack/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/nace-ai/nace-haystack/blob/main/LICENSE.txt)
+
 [Drex](https://console.nace.ai/docs) decision-model components for
 [Haystack](https://github.com/deepset-ai/haystack), deepset's open-source Python framework for AI pipelines,
 agents, and retrieval-augmented generation (RAG). Maintained by [Nace AI](https://nace.ai).
