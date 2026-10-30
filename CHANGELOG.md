@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-30
+
+### Added
+
+- Nace and Haystack logos at the top of the README, and CI and license badges under its title. The README is
+  also the PyPI project page, so they now show there too.
+
 ## [0.1.1] - 2026-10-30
 
 ### Fixed
