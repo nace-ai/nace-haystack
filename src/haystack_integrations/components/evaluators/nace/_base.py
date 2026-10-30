@@ -19,10 +19,10 @@ from haystack_integrations.common.nace.client import (
     provider_name,
     resolve_base_url,
 )
-from haystack_integrations.common.nace.concurrency import map_in_threads
+from haystack_integrations.common.nace.concurrency import map_async, map_in_threads
 from haystack_integrations.common.nace.errors import readable_error
 from haystack_integrations.common.nace.images import ImageInput, image_types
-from haystack_integrations.common.nace.request import DrexResponse, build_call
+from haystack_integrations.common.nace.request import DrexResponse, build_call, require_answers
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ class _NaceEvaluator:
 
     @staticmethod
     def _judged(response: DrexResponse) -> Outcome:
+        require_answers(response, [_QUESTION_ID], probabilities=[_QUESTION_ID])
         probability = response.answers[_QUESTION_ID]["noul"]
         meta = {
             "model": response.model,
@@ -225,23 +226,13 @@ class _NaceEvaluator:
         await self.warm_up_async()
         assert self._async_client is not None  # noqa: S101  # mypy: the client is created by warm_up_async above
         client = self._async_client
-        semaphore = asyncio.Semaphore(self.max_workers)
 
         async def judge(call: dict[str, Any], item_images: list[ImageInput]) -> Outcome:
             try:
-                async with semaphore:
-                    response = await client.system_one(**call)
+                response = await client.system_one(**call)
+                return self._judged(response)
             except nace_sdk.NaceError as error:
                 return self._failed(error, item_images)
-            return self._judged(response)
 
-        tasks = [asyncio.create_task(judge(call, item_images)) for call, item_images in calls]
-        try:
-            outcomes = await asyncio.gather(*tasks)
-        except Exception:
-            # Only reached when `raise_on_failure` is `True`: cancel the remaining requests before re-raising
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
+        outcomes = await map_async(lambda pair: judge(*pair), calls, self.max_workers)
         return self._summarize(list(outcomes))

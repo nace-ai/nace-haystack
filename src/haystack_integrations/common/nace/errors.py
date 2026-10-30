@@ -12,7 +12,8 @@ import nace_sdk
 BILLING_URL = "https://console.nace.ai/dashboard/billing"
 OPENROUTER_CREDITS_URL = "https://openrouter.ai/settings/credits"
 
-# Longer messages are cut, so an unexpected response body can't flood logs and tracebacks
+# Budget for error.message, including provider prefix and recovery guidance.
+# The SDK renders status/request ID separately; structured body and issues remain available.
 MAX_MESSAGE_CHARS = 500
 
 _IMAGE_PATH = re.compile(r"^images\.(\d+)")
@@ -79,6 +80,10 @@ def _unwrap(message: str) -> tuple[str, list[dict[str, str]]]:
     return text, []
 
 
+def _clip(text: str, budget: int) -> str:
+    return text if len(text) <= budget else text[: max(0, budget - 1)] + "…"
+
+
 def _shorten(message: str, provider: str, status: int) -> str:
     # Gateways and proxies answer some failures with an HTML page, which says nothing useful in a Python error
     if message.lstrip()[:15].lower().startswith(("<!doctype", "<html")):
@@ -115,6 +120,7 @@ def _describe(
     repeated = len(issues) == 1 and (issues[0].get("message") == message or lines == [message])
     if lines and not repeated:
         text += "\n" + "\n".join(f"  {line}" for line in lines)
+    guidance = ""
     for issue in issues:
         refused = _IMAGE_PATH.match(issue.get("path") or "")
         if (
@@ -123,16 +129,18 @@ def _describe(
             and image_types[int(refused.group(1))] == "application/pdf"
         ):
             number = int(refused.group(1)) + 1
-            text += (
+            guidance += (
                 f"\nImage {number} is a PDF, and Drex reads images. Convert PDF pages to images first, for example "
                 "with Haystack's PDFToImageContent."
             )
     if error.status in (404, 405) and error.endpoint:
         # Usually a wrong base URL (`api_base_url` or `NACE_BASE_URL`)
-        text += f"\n{error.endpoint} doesn't exist. Check the base URL."
+        guidance = f"\n{_clip(error.endpoint, 200)} doesn't exist. Check the base URL." + guidance
     if error.status == 402:  # noqa: PLR2004
         if provider == "OpenRouter":
-            text += f"\nAdd credits at {OPENROUTER_CREDITS_URL}"
+            guidance = f"\nAdd credits at {OPENROUTER_CREDITS_URL}" + guidance
         else:
-            text += f"\nAdd funds at {BILLING_URL}"
-    return text
+            guidance = f"\nAdd funds at {BILLING_URL}" + guidance
+    guidance = _clip(guidance, 350)
+    budget = MAX_MESSAGE_CHARS - len(f"from {provider}: ") - len(guidance)
+    return _clip(text, budget) + guidance

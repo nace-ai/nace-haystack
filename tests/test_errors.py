@@ -141,7 +141,8 @@ def test_html_error_page_is_summarised():
 
 def test_long_plain_message_is_truncated():
     error = readable_error(sdk_error(500, "y" * 5000), "Drex")
-    assert "y" * 500 in str(error)
+    assert len(error.message) <= 501
+    assert error.message.endswith("…")
     assert "y" * 501 not in str(error)
     assert "…" in str(error)
 
@@ -157,3 +158,41 @@ def test_404_names_the_url_so_a_wrong_base_url_shows():
 
 def test_other_errors_keep_their_short_form():
     assert str(readable_error(sdk_error(418, "teapot"), "Drex")) == "418 from Drex: teapot"
+
+
+@pytest.mark.parametrize(
+    "issues",
+    [
+        [{"path": "questions.q", "message": "x" * 100_000}],
+        [{"path": f"questions.q{i}", "message": "invalid"} for i in range(1000)],
+    ],
+)
+def test_structured_issues_have_a_total_display_budget(issues):
+    original = sdk_error(422, {"error": {"message": "invalid", "issues": issues}})
+    rewritten = readable_error(original, "Drex")
+    assert len(rewritten.message) <= 501
+    assert rewritten.message.endswith("…")
+    assert rewritten.body == original.body
+    assert rewritten.issues == original.issues
+
+
+@pytest.mark.parametrize(
+    ("status", "provider", "hint"),
+    [
+        (404, "Drex", "https://provider.example/v1/system-one"),
+        (405, "Drex", "https://provider.example/v1/system-one"),
+        (402, "Drex", BILLING_URL),
+        (402, "OpenRouter", OPENROUTER_CREDITS_URL),
+    ],
+)
+@pytest.mark.parametrize("structured", [False, True])
+def test_long_errors_keep_recovery_guidance(status, provider, hint, structured):
+    body = {"error": {"message": "invalid" if structured else "x" * 1000}}
+    if structured:
+        body["error"]["issues"] = [{"path": "q", "message": "x" * 1000}]
+    original = sdk_error(status, body, {"x-request-id": "request-for-support"})
+    original.endpoint = "https://provider.example/v1/system-one"
+    rewritten = readable_error(original, provider)
+    assert hint in rewritten.message
+    assert len(rewritten.message) <= 500
+    assert rewritten.request_id == original.request_id

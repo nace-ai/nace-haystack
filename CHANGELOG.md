@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Stop async batch workers from sending queued requests after a terminal failure.
+- Treat missing required answers and invalid probabilities as response-validation failures, respecting per-item failure handling.
+- Cap the complete formatted API error message, including structured issues.
+
 - Bind the default Nace credential to Nace's HTTPS production origins. Custom providers now require an explicit
   provider key; saved pipelines pin their destination, empty keys are refused, and OpenRouter host matching is exact.
 - Strip ambient Vercel bypass headers on other providers and refuse cross-origin redirects in sync and async clients.

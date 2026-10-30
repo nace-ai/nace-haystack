@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from collections.abc import Callable, Iterator, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import TypeVar
 
@@ -46,4 +47,42 @@ def map_in_threads(func: Callable[[T], R], items: Sequence[T], max_workers: int)
                 results[pending.pop(future)] = future.result()
             for _ in done:
                 start_next()
+    return [results[index] for index in range(len(items))]
+
+
+async def map_async(func: Callable[[T], Awaitable[R]], items: Sequence[T], max_workers: int) -> list[R]:
+    """
+    Applies an async function with bounded workers, stopping dispatch when a worker fails.
+
+    :param func: The operation for one item.
+    :param items: Inputs in result order.
+    :param max_workers: Maximum concurrent operations.
+    :returns: Results in input order.
+    """
+    queue = iter(enumerate(items))
+    results: dict[int, R] = {}
+    failed = False
+
+    async def worker() -> None:
+        nonlocal failed
+        while not failed:
+            entry = next(queue, None)
+            if entry is None:
+                return
+            index, item = entry
+            try:
+                results[index] = await func(item)
+            except BaseException:
+                # Set before yielding so no other worker can take another queued item after this failure.
+                failed = True
+                raise
+
+    tasks = [asyncio.create_task(worker()) for _ in range(min(max_workers, len(items)))]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     return [results[index] for index in range(len(items))]
