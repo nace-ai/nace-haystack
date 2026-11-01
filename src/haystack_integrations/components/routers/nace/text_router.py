@@ -16,6 +16,7 @@ from haystack.utils import Secret
 from haystack_integrations.common.nace.client import (
     DEFAULT_MODEL,
     bind_credentials,
+    check_headers,
     client_options,
     is_openrouter,
     make_async_client,
@@ -76,6 +77,7 @@ class NaceTextRouter:
         model: str = DEFAULT_MODEL,
         api_key: Secret | None = None,
         api_base_url: str | None = None,
+        headers: dict[str, str] | None = None,
         min_confidence: float | None = None,
         include_probabilities: bool = False,
         timeout: float | None = None,
@@ -94,10 +96,14 @@ class NaceTextRouter:
             `"drex-max-v1.1"` or `"drex-v2.0"` in production. On OpenRouter, use its model IDs, such as
             `"nace-ai/drex-max"`.
         :param api_key:
-            A provider key. Defaults to `NACE_API_KEY` on Nace production origins; required for custom hosts.
+            A provider key. Defaults to `NACE_API_KEY` on Nace production origins, and to `OPENROUTER_API_KEY` on
+            OpenRouter; required for other custom hosts. A Nace key (`nace_...`) is never sent to OpenRouter.
         :param api_base_url:
             Base URL of the API. If `None`, the `NACE_BASE_URL` environment variable is used, or
             `https://console.nace.ai` if it is unset.
+        :param headers:
+            Extra request headers. On OpenRouter, set `HTTP-Referer` and `X-OpenRouter-Title` to show your own app
+            in OpenRouter instead of Nace's; names are matched case-insensitively.
         :param min_confidence:
             Threshold between 0 and 1 for the answer's `confidence`. Texts below it are sent to the `low_confidence`
             output. If `None`, every text goes to a label output.
@@ -137,6 +143,7 @@ class NaceTextRouter:
         self.instructions = instructions
         self.model = model
         self.api_key, self.api_base_url = bind_credentials(api_key, api_base_url)
+        self.headers = check_headers(headers)
         self.min_confidence = min_confidence
         self.include_probabilities = include_probabilities
         self.timeout = timeout
@@ -157,7 +164,7 @@ class NaceTextRouter:
         component.set_output_types(self, **outputs)
 
     def _client_options(self) -> dict[str, Any]:
-        return client_options(self.api_key, self.api_base_url, self.timeout, self.max_retries)
+        return client_options(self.api_key, self.api_base_url, self.timeout, self.max_retries, self.headers)
 
     def warm_up(self) -> None:
         """
@@ -210,6 +217,7 @@ class NaceTextRouter:
             model=self.model,
             api_key=self.api_key,
             api_base_url=self.api_base_url,
+            headers=self.headers,
             min_confidence=self.min_confidence,
             include_probabilities=self.include_probabilities,
             timeout=self.timeout,

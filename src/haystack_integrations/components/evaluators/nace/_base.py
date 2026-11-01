@@ -12,6 +12,7 @@ from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import (
     bind_credentials,
+    check_headers,
     client_options,
     is_openrouter,
     make_async_client,
@@ -46,6 +47,7 @@ class _NaceEvaluator:
         model: str,
         api_key: Secret | None,
         api_base_url: str | None,
+        headers: dict[str, str] | None,
         timeout: float | None,
         max_retries: int | None,
         max_workers: int,
@@ -57,6 +59,7 @@ class _NaceEvaluator:
         self.instructions = instructions
         self.model = model
         self.api_key, self.api_base_url = bind_credentials(api_key, api_base_url)
+        self.headers = check_headers(headers)
         self.timeout = timeout
         self.max_retries = max_retries
         self.max_workers = max_workers
@@ -66,7 +69,7 @@ class _NaceEvaluator:
         self._async_client_loop: asyncio.AbstractEventLoop | None = None
 
     def _client_options(self) -> dict[str, Any]:
-        return client_options(self.api_key, self.api_base_url, self.timeout, self.max_retries)
+        return client_options(self.api_key, self.api_base_url, self.timeout, self.max_retries, self.headers)
 
     def warm_up(self) -> None:
         """
@@ -118,6 +121,7 @@ class _NaceEvaluator:
             model=self.model,
             api_key=self.api_key,
             api_base_url=self.api_base_url,
+            headers=self.headers,
             timeout=self.timeout,
             max_retries=self.max_retries,
             max_workers=self.max_workers,

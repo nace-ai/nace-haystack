@@ -31,6 +31,11 @@ TEXT_ONLY_MODELS = frozenset({"drex-v1.5", "drex-v2.0"})
 # Drex may take up to 55 seconds to answer, so shorter timeouts can cut off a valid request.
 MIN_TIMEOUT = 60.0
 
+# What OpenRouter shows for apps that identify themselves: https://openrouter.ai/docs/app-attribution
+OPENROUTER_ATTRIBUTION = {"HTTP-Referer": "https://nace.ai", "X-OpenRouter-Title": "Drex for Haystack"}
+OPENROUTER_KEY_ENV = "OPENROUTER_API_KEY"
+NACE_KEY_PREFIX = "nace_"
+
 # The longest wait between retries, in seconds, even when the server asks for a longer one
 MAX_RETRY_WAIT = 60.0
 
@@ -63,9 +68,13 @@ def is_openrouter(base_url: str | None) -> bool:
     Whether `base_url` points to OpenRouter, which takes a different request format.
 
     :param base_url: The API base URL, or `None` for the default.
-    :returns: `True` if the host is openrouter.ai.
+    :returns: `True` for an HTTPS URL whose host is `openrouter.ai` or ends in `.openrouter.ai`.
     """
-    return bool(base_url) and (urlsplit(str(base_url)).hostname or "").lower().rstrip(".") == "openrouter.ai"
+    if not base_url:
+        return False
+    parts = urlsplit(str(base_url))
+    host = (parts.hostname or "").lower().rstrip(".")
+    return parts.scheme == "https" and (host == "openrouter.ai" or host.endswith(".openrouter.ai"))
 
 
 def provider_name(base_url: str | None) -> str:
@@ -122,12 +131,16 @@ def bind_credentials(api_key: Secret | None, api_base_url: str | None) -> tuple[
     """
     Pins a component's destination and prevents implicit Nace credentials reaching other providers.
 
-    :param api_key: An explicit provider secret, or `None` for the ambient Nace key.
+    :param api_key: An explicit provider secret, or `None` for the ambient key: `OPENROUTER_API_KEY`, then
+        `NACE_API_KEY`, on OpenRouter; `NACE_API_KEY` on Nace origins.
     :param api_base_url: The destination, or `None` to resolve it from the environment.
     :returns: The secret and concrete URL to keep together, including in saved pipelines.
     :raises ValueError: If a custom destination would receive implicit Nace credentials.
     """
     base_url = resolve_base_url(api_base_url)
+    if is_openrouter(base_url):
+        # `client_options` refuses a `nace_` key once the secret is resolved
+        return api_key if api_key is not None else Secret.from_env_var([OPENROUTER_KEY_ENV, "NACE_API_KEY"]), base_url
     if not _is_nace_origin(base_url):
         if api_key is None:
             msg = "Custom API destinations require an explicit provider api_key"
@@ -138,8 +151,28 @@ def bind_credentials(api_key: Secret | None, api_base_url: str | None) -> tuple[
     return api_key if api_key is not None else Secret.from_env_var("NACE_API_KEY"), base_url
 
 
+def check_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
+    """
+    Validates the caller's extra request headers when a component is created.
+
+    :param headers: Header names and values, or `None`.
+    :returns: A copy of `headers`, or `None`.
+    :raises TypeError: If `headers` is not a dict of strings.
+    """
+    if headers is None:
+        return None
+    if not isinstance(headers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+        msg = "`headers` must be a dict of header names to string values."
+        raise TypeError(msg)
+    return dict(headers)
+
+
 def client_options(
-    api_key: Secret, api_base_url: str | None, timeout: float | None, max_retries: int | None
+    api_key: Secret,
+    api_base_url: str | None,
+    timeout: float | None,
+    max_retries: int | None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Builds the keyword arguments for `nace_sdk.NaceClient` and `nace_sdk.AsyncNaceClient`.
@@ -148,12 +181,18 @@ def client_options(
     :param api_base_url: The base URL passed to the component, or `None`.
     :param timeout: Timeout in seconds for each request attempt. `None` means 60 seconds.
     :param max_retries: Maximum number of retries after a failed attempt. `None` means the SDK default of 2.
+    :param headers: Extra request headers. On OpenRouter they replace the attribution defaults of the same name,
+        compared case-insensitively.
     :returns: The client keyword arguments.
+    :raises ValueError: If the key is empty, or is a Nace key (`nace_...`) and the destination is OpenRouter.
     """
     api_key, base_url = bind_credentials(api_key, api_base_url)
     key_value = api_key.resolve_value()
     if not key_value or not key_value.strip():
         msg = "api_key must not be empty"
+        raise ValueError(msg)
+    if is_openrouter(base_url) and key_value.strip().startswith(NACE_KEY_PREFIX):
+        msg = f"A Nace API key can't be sent to OpenRouter. Set {OPENROUTER_KEY_ENV} to your OpenRouter key."
         raise ValueError(msg)
     if timeout is None:
         timeout = MIN_TIMEOUT
@@ -163,9 +202,10 @@ def client_options(
             timeout=timeout,
             minimum=MIN_TIMEOUT,
         )
-    headers = {}
-    if is_openrouter(base_url):
-        headers = {"HTTP-Referer": "https://nace.ai", "X-OpenRouter-Title": "Drex for Haystack"}
+    overrides = headers or {}
+    defaults = OPENROUTER_ATTRIBUTION if is_openrouter(base_url) else {}
+    caller_names = {name.lower() for name in overrides}
+    merged = {name: value for name, value in defaults.items() if name.lower() not in caller_names} | overrides
     # The SDK's retry budget defaults to 30 seconds in total, which would skip retries after a long attempt.
     # `timeout` already bounds each attempt, so the budget is disabled.
     retry_kwargs: dict[str, Any] = {"timeout": None}
@@ -176,7 +216,7 @@ def client_options(
         "base_url": base_url,
         "timeout": timeout,
         "retry": CappedRetryPolicy(**retry_kwargs),
-        "headers": headers,
+        "headers": merged,
         "client_info": CLIENT_NAME,
     }
 

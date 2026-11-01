@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- `headers` on every component. On OpenRouter it replaces the `HTTP-Referer` and `X-OpenRouter-Title` attribution
+  defaults, matched case-insensitively, so your app shows up in OpenRouter instead of Nace's. It is saved with the
+  component.
+
+### Changed
+
+- On OpenRouter, `api_key` defaults to `OPENROUTER_API_KEY`, then `NACE_API_KEY`. A key starting with `nace_` is
+  refused before any request, with an error naming `OPENROUTER_API_KEY`.
+- Hosts ending in `.openrouter.ai` count as OpenRouter. Plain HTTP `openrouter.ai` URLs no longer do.
+
 ## [0.1.2] - 2026-10-30
 
 ### Added

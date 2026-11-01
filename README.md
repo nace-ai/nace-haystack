@@ -271,9 +271,24 @@ router = NaceTextRouter(
 )
 ```
 
-Set `OPENROUTER_API_KEY` in your environment before running the router. Use a separate provider environment
-variable for other hosts; `NACE_API_KEY` is reserved for Nace's production API. Custom destinations require an
-explicit `api_key`, and an empty key is refused before a request is sent. Ambient Vercel bypass headers are
+On OpenRouter, `api_key` defaults to `OPENROUTER_API_KEY`, then to `NACE_API_KEY` if that holds an OpenRouter key.
+A Nace key (`nace_...`) is never sent to OpenRouter; set `OPENROUTER_API_KEY` instead. Use a separate provider
+environment variable for other hosts, because `NACE_API_KEY` is reserved for Nace's production API. Other custom
+destinations require an explicit `api_key`, and an empty key is refused before a request is sent.
+
+Requests to OpenRouter identify the app as Drex for Haystack. To show your own app in OpenRouter, pass `headers`
+to any component; they replace the defaults with the same name, in any letter case:
+
+```python
+router = NaceTextRouter(
+    labels=["billing", "technical"],
+    model="nace-ai/drex-max",
+    api_base_url="https://openrouter.ai/api/v1",
+    headers={"HTTP-Referer": "https://myapp.example", "X-OpenRouter-Title": "My App"},
+)
+```
+
+ Ambient Vercel bypass headers are
 removed from requests to other providers, and redirects to a different origin are refused.
 
 The base URL is resolved when the component is constructed, then saved with the pipeline. Changing
