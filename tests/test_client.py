@@ -68,7 +68,7 @@ class TestBaseUrl:
         assert not is_openrouter("https://notopenrouter.ai/api")
         assert is_openrouter("https://OPENROUTER.AI./api")
         assert is_openrouter("https://eu.openrouter.ai/api")
-        assert not is_openrouter("http://openrouter.ai/api")
+        assert is_openrouter("http://openrouter.ai/api")
         assert not is_openrouter("https://openrouter.ai.example.com/api")
         assert not is_openrouter(None)
         assert provider_name(None) == "Drex"
@@ -126,6 +126,12 @@ class TestClientOptions:
             {"HTTP-Referer": "https://a.b"},
         )
         assert options["headers"] == {"HTTP-Referer": "https://a.b", "X-OpenRouter-Title": "Drex for Haystack"}
+
+    def test_legacy_x_title_replaces_the_title_default(self):
+        options = client_options(
+            Secret.from_token("provider-key"), "https://openrouter.ai/api/v1", None, None, {"X-Title": "My app"}
+        )
+        assert options["headers"] == {"HTTP-Referer": "https://nace.ai", "X-Title": "My app"}
 
     def test_attribution_defaults_are_not_sent_to_nace(self, api_key):
         assert client_options(api_key, None, None, None, {"X-Extra": "1"})["headers"] == {"X-Extra": "1"}

@@ -167,7 +167,9 @@ def test_nace_requests_do_not_carry_the_openrouter_attribution():
 
 
 @pytest.mark.parametrize("factory", FACTORIES)
-@pytest.mark.parametrize("host", ["https://openrouter.ai/api/v1", "https://eu.openrouter.ai/api/v1"])
+@pytest.mark.parametrize(
+    "host", ["https://openrouter.ai/api/v1", "https://eu.openrouter.ai/api/v1", "http://openrouter.ai/api/v1"]
+)
 @pytest.mark.parametrize("ambient", ["NACE_API_KEY", "OPENROUTER_API_KEY"])
 def test_a_nace_key_is_never_sent_to_openrouter(factory, host, ambient, monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)

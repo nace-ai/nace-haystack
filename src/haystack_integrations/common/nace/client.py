@@ -68,13 +68,13 @@ def is_openrouter(base_url: str | None) -> bool:
     Whether `base_url` points to OpenRouter, which takes a different request format.
 
     :param base_url: The API base URL, or `None` for the default.
-    :returns: `True` for an HTTPS URL whose host is `openrouter.ai` or ends in `.openrouter.ai`.
+    :returns: `True` if the host is `openrouter.ai` or ends in `.openrouter.ai`, over any scheme, so a plain-HTTP
+        URL can't bypass the Nace key check.
     """
     if not base_url:
         return False
-    parts = urlsplit(str(base_url))
-    host = (parts.hostname or "").lower().rstrip(".")
-    return parts.scheme == "https" and (host == "openrouter.ai" or host.endswith(".openrouter.ai"))
+    host = (urlsplit(str(base_url)).hostname or "").lower().rstrip(".")
+    return host == "openrouter.ai" or host.endswith(".openrouter.ai")
 
 
 def provider_name(base_url: str | None) -> str:
@@ -205,6 +205,9 @@ def client_options(
     overrides = headers or {}
     defaults = OPENROUTER_ATTRIBUTION if is_openrouter(base_url) else {}
     caller_names = {name.lower() for name in overrides}
+    # `X-Title` is OpenRouter's legacy name for the title, so it replaces the title default too
+    if "x-title" in caller_names:
+        caller_names.add("x-openrouter-title")
     merged = {name: value for name, value in defaults.items() if name.lower() not in caller_names} | overrides
     # The SDK's retry budget defaults to 30 seconds in total, which would skip retries after a long attempt.
     # `timeout` already bounds each attempt, so the budget is disabled.
