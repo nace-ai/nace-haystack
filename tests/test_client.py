@@ -13,6 +13,7 @@ from haystack_integrations.common.nace.client import (
     CLIENT_NAME,
     MAX_RETRY_WAIT,
     CappedRetryPolicy,
+    check_headers,
     client_options,
     is_openrouter,
     is_text_only,
@@ -66,6 +67,9 @@ class TestBaseUrl:
         assert provider_name("https://openrouter.ai/api") == "OpenRouter"
         assert not is_openrouter("https://notopenrouter.ai/api")
         assert is_openrouter("https://OPENROUTER.AI./api")
+        assert is_openrouter("https://eu.openrouter.ai/api")
+        assert is_openrouter("http://openrouter.ai/api")
+        assert not is_openrouter("https://openrouter.ai.example.com/api")
         assert not is_openrouter(None)
         assert provider_name(None) == "Drex"
 
@@ -98,6 +102,44 @@ class TestClientOptions:
         assert options["base_url"] == "https://openrouter.ai/api"
         assert options["headers"]["HTTP-Referer"] == "https://nace.ai"
         assert options["headers"]["X-OpenRouter-Title"] == "Drex for Haystack"
+
+    def test_caller_headers_replace_openrouter_defaults_case_insensitively(self):
+        options = client_options(
+            Secret.from_token("provider-key"),
+            "https://openrouter.ai/api/v1",
+            None,
+            None,
+            {"http-referer": "https://myapp.example", "x-openrouter-title": "My app", "X-Extra": "1"},
+        )
+        assert options["headers"] == {
+            "http-referer": "https://myapp.example",
+            "x-openrouter-title": "My app",
+            "X-Extra": "1",
+        }
+
+    def test_caller_headers_keep_the_other_default(self):
+        options = client_options(
+            Secret.from_token("provider-key"),
+            "https://openrouter.ai/api/v1",
+            None,
+            None,
+            {"HTTP-Referer": "https://a.b"},
+        )
+        assert options["headers"] == {"HTTP-Referer": "https://a.b", "X-OpenRouter-Title": "Drex for Haystack"}
+
+    def test_legacy_x_title_replaces_the_title_default(self):
+        options = client_options(
+            Secret.from_token("provider-key"), "https://openrouter.ai/api/v1", None, None, {"X-Title": "My app"}
+        )
+        assert options["headers"] == {"HTTP-Referer": "https://nace.ai", "X-Title": "My app"}
+
+    def test_attribution_defaults_are_not_sent_to_nace(self, api_key):
+        assert client_options(api_key, None, None, None, {"X-Extra": "1"})["headers"] == {"X-Extra": "1"}
+
+    @pytest.mark.parametrize("headers", ["x: y", {"a": 1}, {1: "a"}, [("a", "b")]])
+    def test_headers_must_be_a_dict_of_strings(self, headers):
+        with pytest.raises(TypeError, match="headers"):
+            check_headers(headers)
 
 
 class TestClient:

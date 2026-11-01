@@ -175,6 +175,7 @@ class TestFaithfulness:
             model="drex-v2.0",
             api_key=Secret.from_env_var("OTHER_NACE_KEY"),
             api_base_url="https://drex.example.com",
+            headers={"HTTP-Referer": "https://example.com", "X-OpenRouter-Title": "My app"},
             timeout=90.0,
             max_retries=5,
             max_workers=4,
@@ -186,6 +187,7 @@ class TestFaithfulness:
             "model": "drex-v2.0",
             "api_key": {"env_vars": ["OTHER_NACE_KEY"], "strict": True, "type": "env_var"},
             "api_base_url": "https://drex.example.com",
+            "headers": {"HTTP-Referer": "https://example.com", "X-OpenRouter-Title": "My app"},
             "timeout": 90.0,
             "max_retries": 5,
             "max_workers": 4,
@@ -193,6 +195,7 @@ class TestFaithfulness:
         }
         restored = component_from_dict(NaceFaithfulnessEvaluator, data, name="evaluator")
         assert restored.to_dict() == data
+        assert restored.headers == {"HTTP-Referer": "https://example.com", "X-OpenRouter-Title": "My app"}
         assert restored.api_key.resolve_value() == "other"
 
 

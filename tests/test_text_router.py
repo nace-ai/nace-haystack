@@ -119,6 +119,7 @@ class TestSerialization:
             model="drex-v2.0",
             api_key=Secret.from_env_var("OTHER_NACE_KEY"),
             api_base_url="https://drex.example.com",
+            headers={"HTTP-Referer": "https://example.com", "X-OpenRouter-Title": "My app"},
             min_confidence=0.6,
             include_probabilities=True,
             timeout=90.0,
@@ -133,6 +134,7 @@ class TestSerialization:
                 "model": "drex-v2.0",
                 "api_key": {"env_vars": ["OTHER_NACE_KEY"], "strict": True, "type": "env_var"},
                 "api_base_url": "https://drex.example.com",
+                "headers": {"HTTP-Referer": "https://example.com", "X-OpenRouter-Title": "My app"},
                 "min_confidence": 0.6,
                 "include_probabilities": True,
                 "timeout": 90.0,
@@ -145,6 +147,7 @@ class TestSerialization:
         assert restored.model == "drex-v2.0"
         assert restored.api_key.resolve_value() == "other"
         assert restored.api_base_url == "https://drex.example.com"
+        assert restored.headers == {"HTTP-Referer": "https://example.com", "X-OpenRouter-Title": "My app"}
         assert restored.min_confidence == 0.6
         assert restored.include_probabilities is True
         assert restored.timeout == 90.0

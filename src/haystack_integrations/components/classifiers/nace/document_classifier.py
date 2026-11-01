@@ -17,6 +17,7 @@ from haystack.utils import Secret
 from haystack_integrations.common.nace.client import (
     DEFAULT_MODEL,
     bind_credentials,
+    check_headers,
     client_options,
     is_openrouter,
     make_async_client,
@@ -103,6 +104,7 @@ class NaceDocumentClassifier:
         model: str = DEFAULT_MODEL,
         api_key: Secret | None = None,
         api_base_url: str | None = None,
+        headers: dict[str, str] | None = None,
         classification_field: str | None = None,
         metadata_field: str = "nace",
         timeout: float | None = None,
@@ -121,10 +123,14 @@ class NaceDocumentClassifier:
             The Drex model to use. Defaults to the newest Drex model; pin a model such as `"drex-max-v1.1"` or
             `"drex-v2.0"` in production. `drex-v2.0` reads text only and bills fewer tokens on short texts.
         :param api_key:
-            A provider key. Defaults to `NACE_API_KEY` on Nace production origins; required for custom hosts.
+            A provider key. Defaults to `NACE_API_KEY` on Nace production origins, and to `OPENROUTER_API_KEY` on
+            OpenRouter; required for other custom hosts. A Nace key (`nace_...`) is never sent to OpenRouter.
         :param api_base_url:
             Base URL of the API. If `None`, the `NACE_BASE_URL` environment variable is used, or
             `https://console.nace.ai` if it is unset.
+        :param headers:
+            Extra request headers. On OpenRouter, set `HTTP-Referer` and `X-OpenRouter-Title` to show your own app
+            in OpenRouter instead of Nace's; names are matched case-insensitively.
         :param classification_field:
             Name of the document's metadata field to classify. If `None`, `Document.content` is classified.
         :param metadata_field:
@@ -152,6 +158,7 @@ class NaceDocumentClassifier:
         self.questions = questions
         self.model = model
         self.api_key, self.api_base_url = bind_credentials(api_key, api_base_url)
+        self.headers = check_headers(headers)
         self.classification_field = classification_field
         self.metadata_field = metadata_field
         self.timeout = timeout
@@ -163,7 +170,7 @@ class NaceDocumentClassifier:
         self._async_client_loop: asyncio.AbstractEventLoop | None = None
 
     def _client_options(self) -> dict[str, Any]:
-        return client_options(self.api_key, self.api_base_url, self.timeout, self.max_retries)
+        return client_options(self.api_key, self.api_base_url, self.timeout, self.max_retries, self.headers)
 
     def warm_up(self) -> None:
         """
@@ -218,6 +225,7 @@ class NaceDocumentClassifier:
             model=self.model,
             api_key=self.api_key,
             api_base_url=self.api_base_url,
+            headers=self.headers,
             classification_field=self.classification_field,
             metadata_field=self.metadata_field,
             timeout=self.timeout,

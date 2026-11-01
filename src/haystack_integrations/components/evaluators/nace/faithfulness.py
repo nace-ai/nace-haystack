@@ -50,6 +50,7 @@ class NaceFaithfulnessEvaluator(_NaceEvaluator):
         model: str = DEFAULT_MODEL,
         api_key: Secret | None = None,
         api_base_url: str | None = None,
+        headers: dict[str, str] | None = None,
         timeout: float | None = None,
         max_retries: int | None = None,
         max_workers: int = 3,
@@ -64,10 +65,14 @@ class NaceFaithfulnessEvaluator(_NaceEvaluator):
         :param model:
             The Drex model to use. Defaults to the newest Drex model; pin it in production.
         :param api_key:
-            A provider key. Defaults to `NACE_API_KEY` on Nace production origins; required for custom hosts.
+            A provider key. Defaults to `NACE_API_KEY` on Nace production origins, and to `OPENROUTER_API_KEY` on
+            OpenRouter; required for other custom hosts. A Nace key (`nace_...`) is never sent to OpenRouter.
         :param api_base_url:
             Base URL of the API. If `None`, the `NACE_BASE_URL` environment variable is used, or
             `https://console.nace.ai` if it is unset.
+        :param headers:
+            Extra request headers. On OpenRouter, set `HTTP-Referer` and `X-OpenRouter-Title` to show your own app
+            in OpenRouter instead of Nace's; names are matched case-insensitively.
         :param timeout:
             Timeout in seconds for each request attempt. If `None`, 60 seconds are used.
         :param max_retries:
@@ -85,6 +90,7 @@ class NaceFaithfulnessEvaluator(_NaceEvaluator):
             model=model,
             api_key=api_key,
             api_base_url=api_base_url,
+            headers=headers,
             timeout=timeout,
             max_retries=max_retries,
             max_workers=max_workers,
