@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- `NaceDocumentConverter`: converts file paths, `ByteStream` sources or `https://` URL sources into Markdown
+  Documents with NDI Parse, optionally one Document per page or section, with parallel sources and per-source
+  failure handling. Uploaded files and jobs are deleted after each run; a result NDI cut at 1 MiB is never returned
+  as the full content.
+- `NaceDocumentExtractor`: fills a JSON Schema from each source with NDI Extract, as one Document per source with
+  the extracted data as JSON in `content` and NDI's field report in `meta["extraction"]`.
+- `NaceWorkspaceSearch`: answers one question over a Nace workspace's ingested files with Drex Search, as a
+  `GeneratedAnswer` whose documents are the cited evidence quotes, without scores.
+
+### Changed
+
+- NDI needs `nace-sdk>=0.9.0`, up from `>=0.3.0`.
+- The request hook allows a request to another origin only when it carries no credentials and is a clean HTTPS URL:
+  NDI uploads and signed-link downloads use such requests. A request with `Authorization` to another origin, or one
+  over plain HTTP, is still refused.
+
 ## [0.1.2] - 2026-10-30
 
 ### Added

@@ -185,10 +185,16 @@ def _prepare_request(request: httpx.Request, base_url: str) -> None:
     # Keep credentials bound to the configured origin, including when redirects are enabled by an HTTP client.
     expected = httpx.URL(base_url)
     if (request.url.scheme, request.url.host, request.url.port) != (expected.scheme, expected.host, expected.port):
-        msg = "Refusing to send credentials to a different API origin"
-        raise ValueError(msg)
+        # NDI uploads and signed-link downloads go to a second host, but only without credentials: nace-sdk sends
+        # them with `X-Upload-Token` or a signed URL and no `Authorization`. A clean HTTPS request without
+        # credentials is allowed; anything else to another origin is refused.
+        if "authorization" in request.headers or request.url.scheme != "https" or request.url.userinfo:
+            msg = "Refusing to send credentials to a different API origin"
+            raise ValueError(msg)
+        request.headers.pop("cookie", None)
     if not _is_nace_origin(str(request.url)):
         request.headers.pop("x-vercel-protection-bypass", None)
+    # The upload host answers 403 to a request without a User-Agent.
     request.headers["User-Agent"] = CLIENT_NAME
 
 

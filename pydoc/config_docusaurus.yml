@@ -4,6 +4,9 @@ loaders:
       - haystack_integrations.components.classifiers.nace.document_classifier
       - haystack_integrations.components.evaluators.nace.faithfulness
       - haystack_integrations.components.evaluators.nace.context_relevance
+      - haystack_integrations.components.converters.nace.document_converter
+      - haystack_integrations.components.extractors.nace.document_extractor
+      - haystack_integrations.components.connectors.nace.workspace_search
     search_path: [../src]
 processors:
   - type: filter

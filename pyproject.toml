@@ -5,12 +5,22 @@ build-backend = "hatchling.build"
 [project]
 name = "nace-haystack"
 dynamic = ["version"]
-description = "Haystack integration for Drex decision models by Nace"
+description = "Haystack integration for Drex decision models and Nace Document Intelligence (NDI)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE.txt"]
-keywords = ["Haystack", "Drex", "Nace", "classification", "decision model", "routing", "evaluation"]
+keywords = [
+  "Haystack",
+  "Drex",
+  "Nace",
+  "classification",
+  "decision model",
+  "routing",
+  "evaluation",
+  "document parsing",
+  "extraction",
+]
 authors = [{ name = "Nace AI", email = "hello@nace.ai" }]
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
@@ -23,7 +33,7 @@ classifiers = [
   "Programming Language :: Python :: 3.15",
   "Programming Language :: Python :: Implementation :: CPython",
 ]
-dependencies = ["haystack-ai>=3.0.0", "nace-sdk>=0.3.0,<1.0.0", "httpx>=0.27,<1.0", "filetype>=1.0.0", "pydantic>=2.0"]
+dependencies = ["haystack-ai>=3.0.0", "nace-sdk>=0.9.0,<1.0.0", "httpx>=0.27,<1.0", "filetype>=1.0.0", "pydantic>=2.0"]
 
 [project.urls]
 Documentation = "https://console.nace.ai/docs"
@@ -74,7 +84,10 @@ integration-cov-append-retry = 'pytest --cov=haystack_integrations --cov-append 
 types = """mypy -p haystack_integrations.common.nace \
 -p haystack_integrations.components.routers.nace \
 -p haystack_integrations.components.classifiers.nace \
--p haystack_integrations.components.evaluators.nace {args}"""
+-p haystack_integrations.components.evaluators.nace \
+-p haystack_integrations.components.converters.nace \
+-p haystack_integrations.components.extractors.nace \
+-p haystack_integrations.components.connectors.nace {args}"""
 
 [tool.mypy]
 install_types = true

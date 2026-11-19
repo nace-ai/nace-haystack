@@ -11,7 +11,10 @@ from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import client_options, make_async_client, make_client
 from haystack_integrations.components.classifiers.nace import NaceDocumentClassifier
+from haystack_integrations.components.connectors.nace import NaceWorkspaceSearch
+from haystack_integrations.components.converters.nace import NaceDocumentConverter
 from haystack_integrations.components.evaluators.nace import NaceContextRelevanceEvaluator, NaceFaithfulnessEvaluator
+from haystack_integrations.components.extractors.nace import NaceDocumentExtractor
 from haystack_integrations.components.routers.nace import NaceTextRouter
 
 FACTORIES = [
@@ -19,6 +22,9 @@ FACTORIES = [
     lambda **kwargs: NaceDocumentClassifier(questions={"q": {"type": "noul", "instructions": "ok?"}}, **kwargs),
     NaceFaithfulnessEvaluator,
     NaceContextRelevanceEvaluator,
+    NaceDocumentConverter,
+    lambda **kwargs: NaceDocumentExtractor(schema={"type": "object"}, **kwargs),
+    lambda **kwargs: NaceWorkspaceSearch(workspace_id="11111111-1111-1111-1111-111111111111", **kwargs),
 ]
 ANSWER = {
     "model": "drex-max-v1.1",

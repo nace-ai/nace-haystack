@@ -218,6 +218,55 @@ python -m jupyterlab notebooks/nace_haystack_cookbook.ipynb
 Select the virtual environment's Python kernel. The notebook reads sample files from the checkout; run it from the
 repository root or the `notebooks/` directory.
 
+## Documents (NDI)
+
+Three components bring [Nace Document Intelligence](https://console.nace.ai/docs) (NDI) to Haystack: they parse
+files into Markdown, fill a JSON Schema from them, and answer questions over a workspace of ingested files. NDI is
+cloud only: every source you pass is sent to the Nace API.
+
+A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. Local files are
+uploaded into your Nace workspace for the job; after each run, the uploaded file and the job are deleted again, also
+when the job fails. Zero-retention accounts must use `https://` URL sources, because their NDI refuses an upload.
+
+`NaceDocumentConverter` turns each file into one Document with the Markdown NDI produced, or into one Document per
+page or section with `chunking=`:
+
+```python
+from haystack_integrations.components.converters.nace import NaceDocumentConverter
+
+converter = NaceDocumentConverter()
+result = converter.run(sources=["invoice.html"])
+print(result["documents"][0].content)
+# '# Invoice INV-1042 ...'
+```
+
+`NaceDocumentExtractor` fills a JSON Schema from each file. The Document's `content` is the extracted data as JSON,
+and `meta["extraction"]` keeps it with NDI's per-field report:
+
+```python
+from haystack_integrations.components.extractors.nace import NaceDocumentExtractor
+
+extractor = NaceDocumentExtractor(
+    schema={"type": "object", "properties": {"invoice_number": {"type": "string"}}, "required": ["invoice_number"]}
+)
+result = extractor.run(sources=["invoice.html"])
+print(result["documents"][0].meta["extraction"]["data"])
+# {'invoice_number': 'INV-1042'}
+```
+
+`NaceWorkspaceSearch` answers one question over a workspace's ingested files with Drex Search. It is not a retriever
+and returns no scores: it returns a `GeneratedAnswer` whose documents are the evidence quotes the answer cites. The
+workspace must already exist and its files must be ingested, in the console or with nace-sdk:
+
+```python
+from haystack_integrations.components.connectors.nace import NaceWorkspaceSearch
+
+search = NaceWorkspaceSearch(workspace_id="11111111-1111-1111-1111-111111111111")
+result = search.run(query="What is the total of invoice INV-1042?")
+print(result["answers"][0].data, result["answers"][0].documents[0].content)
+# 'The total of invoice INV-1042 is $284.00.' 'Total: $284.00'
+```
+
 ## Models
 
 The default model is `drex-max-v1.1` (Drex Max v1.1), which reads text, JSON and images. The default moves to the
