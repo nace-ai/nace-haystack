@@ -191,7 +191,9 @@ def _prepare_request(request: httpx.Request, base_url: str) -> None:
         if "authorization" in request.headers or request.url.scheme != "https" or request.url.userinfo:
             msg = "Refusing to send credentials to a different API origin"
             raise ValueError(msg)
+        # The bypass secret belongs to the configured origin only, also when the other origin is a Nace origin.
         request.headers.pop("cookie", None)
+        request.headers.pop("x-vercel-protection-bypass", None)
     if not _is_nace_origin(str(request.url)):
         request.headers.pop("x-vercel-protection-bypass", None)
     # The upload host answers 403 to a request without a User-Agent.

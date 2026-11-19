@@ -6,6 +6,7 @@
 
 import mimetypes
 import os
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -240,10 +241,11 @@ def convert_sources(
 
 def _safe_source_label(source: str | Path | ByteStream) -> str:
     """
-    A label for a source that is safe to log: no file bytes, no signed query string.
+    A label for a source that is safe to log: no file bytes, no user info, no signed query string.
 
-    An `https://` source is shown without its query and fragment, a local path as given, and a `ByteStream` by the
-    file name NDI would upload it under, or as `ByteStream` when that name cannot be told.
+    An `https://` source is shown without its user info, query and fragment, a local path as given, and a
+    `ByteStream` by the file name NDI would upload it under, or as `ByteStream` when that name cannot be told. The
+    label never raises: an `https://` source that cannot be parsed is shown as `https URL`.
 
     :param source:
         The source to label.
@@ -252,8 +254,16 @@ def _safe_source_label(source: str | Path | ByteStream) -> str:
     """
     if isinstance(source, str):
         if source.startswith("https://"):
-            parts = urlsplit(source)
-            return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+            try:
+                parts = urlsplit(source)
+                host = parts.hostname or ""
+                if ":" in host:  # an IPv6 host needs its brackets back
+                    host = f"[{host}]"
+                if parts.port is not None:  # reading a malformed port raises ValueError
+                    host = f"{host}:{parts.port}"
+                return urlunsplit((parts.scheme, host, parts.path, "", ""))
+            except ValueError:
+                return "https URL"
         return source
     if isinstance(source, Path):
         return str(source)
@@ -263,20 +273,30 @@ def _safe_source_label(source: str | Path | ByteStream) -> str:
         return "ByteStream"
 
 
-def _without_full_source(text: str, source: str | Path | ByteStream) -> str:
+_URL_IN_TEXT = re.compile(r"https?://\S+")
+
+
+def _without_url_secrets(text: str) -> str:
     """
-    Replaces the full `https://` source string in `text` with its safe label, so a signed query stays out of logs.
+    Removes user info, query and fragment from every http(s) URL in `text`, for the log line only.
+
+    A URL the error text clipped loses its clipped part too: `https://host/a.pdf?sig=ab...` becomes
+    `https://host/a.pdf`, and `https://user:pw@host/a.pdf?sig=abc#x` becomes `https://host/a.pdf`. Raised
+    exceptions keep the URLs they were built with.
 
     :param text:
         The error text about to be logged.
-    :param source:
-        The source the error is about.
     :returns:
-        The text with every occurrence of the full source replaced by its label.
+        The text with every http(s) URL reduced to its scheme, host and path.
     """
-    if isinstance(source, str) and source.startswith("https://"):
-        return text.replace(source, _safe_source_label(source))
-    return text
+
+    def scrub(match: re.Match[str]) -> str:
+        url = match.group(0).split("?", 1)[0].split("#", 1)[0]
+        scheme, _, rest = url.partition("://")
+        authority, slash, path = rest.partition("/")
+        return f"{scheme}://{authority.rpartition('@')[2]}{slash}{path}"
+
+    return _URL_IN_TEXT.sub(scrub, text)
 
 
 def _convert_one(
@@ -294,7 +314,7 @@ def _convert_one(
             logger.warning(
                 "Converting source {source} failed: {error}. Skipping it.",
                 source=_safe_source_label(source),
-                error=_without_full_source(str(failure), source),
+                error=_without_url_secrets(str(failure)),
             )
             return []
         if isinstance(error, nace_sdk.NaceError):

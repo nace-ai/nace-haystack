@@ -21,7 +21,8 @@ FILE_ID = "22222222-2222-2222-2222-222222222222"
 JOB_ID = "33333333-3333-3333-3333-333333333333"
 SEARCH_JOB_ID = "55555555-5555-5555-5555-555555555555"
 UPLOAD_URL = "https://uploads.example/uploads/1"
-CONTENT_PATH = f"/v1/documents/jobs/{JOB_ID}/document-content"
+ARTIFACT_REF = "9f8e7d6c5b4a3210"
+CONTENT_PATH = f"/v1/documents/jobs/{JOB_ID}/document-content/{ARTIFACT_REF}"
 MARKDOWN = "# Invoice INV-1042\n\nTotal: $284.00"
 FULL_MARKDOWN = MARKDOWN + "\n\nThe rest of the full parse result."
 ANSWER = "The total of invoice INV-1042 is $284.00."
@@ -34,7 +35,8 @@ EVIDENCES = [
         "quote": "Invoice INV-1042",
     },
 ]
-JOB_ERROR = {"code": "cannot_read_file", "message": "The document service cannot read this file."}
+SIGNED_URL = "https://reader:hunter2@docs.example/invoice.html?sig=secret-signature"
+JOB_ERROR = {"code": "cannot_read_file", "message": f"The document service cannot read this file: {SIGNED_URL}."}
 UPLOAD_JOB = {
     "job_id": "44444444-4444-4444-4444-444444444444",
     "kind": "file_upload",
@@ -221,12 +223,19 @@ def test_converter_failed_job_skips_or_raises_and_still_cleans_up(tmp_path, capl
     assert len(raising.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
     assert len(raising.sent("DELETE", f"/v1/documents/workspaces/{WORKSPACE_ID}/files/{FILE_ID}")) == 1
 
-    # A failed https source is logged by its URL without the query, so a signed query string stays out of the log.
-    url = "https://docs.example/invoice.html?sig=secret-signature"
+    # A malformed https source is skipped with a warning, and the other sources still convert.
+    mixed = FakeNdi({"document": {"markdown": MARKDOWN, "page_count": 1}, "disclosures": []})
+    converter = _with_fake_client(NaceDocumentConverter(max_retries=0), mixed)
+    result = converter.run(sources=["https://[broken/invoice.pdf", "https://docs.example/invoice.html"])
+    assert [document.content for document in result["documents"]] == [MARKDOWN]
+    assert "https URL" in caplog.text
+
+    # A failed signed https source is logged without its user info or its query, also when the error quotes it.
     skipping_url = FakeNdi(status="failed")
     converter = _with_fake_client(NaceDocumentConverter(max_retries=0), skipping_url)
-    assert converter.run(sources=[url])["documents"] == []
+    assert converter.run(sources=[SIGNED_URL])["documents"] == []
     assert "https://docs.example/invoice.html" in caplog.text
+    assert "hunter2" not in caplog.text
     assert "secret-signature" not in caplog.text
     assert len(skipping_url.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
 
@@ -259,9 +268,12 @@ def test_converter_truncated_result_fetches_the_full_markdown():
     result = converter.run(sources=["https://docs.example/invoice.html"])
 
     assert result["documents"][0].content == FULL_MARKDOWN
-    # The full Markdown is the job's own file: fetched from the base URL origin, with the API key.
+    # The full Markdown is the job's own file, at its artifact reference: fetched from the base URL origin with the
+    # API key.
     fetch = api.requests[1]
-    assert (fetch.method, fetch.url.path) == ("GET", CONTENT_PATH)
+    assert fetch.method == "GET"
+    assert fetch.url.path == CONTENT_PATH
+    assert fetch.url.path.endswith(f"/document-content/{ARTIFACT_REF}")
     assert fetch.url.host == "console.nace.ai"
     assert fetch.headers["authorization"] == "Bearer fake-nace-key"
     assert len(api.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
@@ -352,3 +364,9 @@ def test_request_hook_refuses_credentials_and_plain_http_at_other_origins():
         )
     with pytest.raises(ValueError, match="different API origin"):
         _prepare_request(httpx.Request("GET", "http://uploads.example/file"), BASE)
+    # A request to another origin never carries the Vercel bypass secret, not even to another Nace origin.
+    to_nace = httpx.Request(
+        "GET", "https://drex.nace.ai/file", headers={"x-vercel-protection-bypass": "fake-bypass-secret"}
+    )
+    _prepare_request(to_nace, BASE)
+    assert "x-vercel-protection-bypass" not in to_nace.headers
