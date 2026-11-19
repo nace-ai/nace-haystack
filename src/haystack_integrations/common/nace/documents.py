@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import nace_sdk
@@ -21,6 +22,42 @@ from haystack_integrations.common.nace.concurrency import map_in_threads
 from haystack_integrations.common.nace.errors import readable_error
 
 logger = logging.getLogger(__name__)
+
+
+def finished_job(client: nace_sdk.NaceClient, job: nace_sdk.DocumentJob, job_timeout: float) -> nace_sdk.DocumentJob:
+    """
+    Waits for an NDI job if it is not terminal yet, and returns it once it succeeded with a result.
+
+    A job that ended `failed` or `cancelled` raises `nace_sdk.NaceJobFailedError`. A job that succeeded without a
+    result raises `nace_sdk.NaceError` naming the job and its result state: a zero-retention account gets a result
+    only in the response that creates the job, so a job read later answers `not_retained`, and an old job's result
+    can be `expired`.
+
+    :param client:
+        The synchronous Nace client.
+    :param job:
+        The job as the call that created it returned it.
+    :param job_timeout:
+        How long to wait for the job to finish, in seconds.
+    :returns:
+        The job that succeeded, with its result.
+    :raises nace_sdk.NaceJobFailedError:
+        If the job failed or was cancelled.
+    :raises nace_sdk.NaceError:
+        If the wait fails, or the job succeeded without a result.
+    """
+    if not job.is_terminal:
+        job = client.jobs.wait(job.job_id, timeout=job_timeout, raise_on_failure=False)
+    if job.status != "succeeded":
+        raise nace_sdk.NaceJobFailedError(job)
+    if job.result is None:
+        state = getattr(job, "result_state", None)
+        msg = (
+            f"Job {job.job_id} succeeded without a result (result_state: {state}). Zero-retention accounts get a "
+            "result only in the response that creates the job. A result read later can also be expired."
+        )
+        raise nace_sdk.NaceError(msg)
+    return job
 
 
 @contextmanager
@@ -37,7 +74,7 @@ def document_job(
     An `https://` string is sent to NDI as a URL source, as given and without downloading it. Every other source is
     read into a `ByteStream` and uploaded into the account's workspace first. The job is created with
     `wait_seconds=60` (NDI holds the create open that long, and zero-retention accounts refuse a shorter wait), then
-    waited for until it is terminal. A job that did not succeed raises `nace_sdk.NaceJobFailedError`.
+    finished with `finished_job`: waited for until terminal, and returned once it succeeded with a result.
 
     Use as a context manager: the yielded job's `result` is read inside the `with` block. On exit the job is deleted,
     and an uploaded file is deleted after it, also when the body raises. A cleanup call that fails is logged and
@@ -54,9 +91,9 @@ def document_job(
     :param options:
         Body fields of the create request, such as `parse_mode` or `schema`.
     :returns:
-        A context manager that yields the succeeded `nace_sdk.DocumentJob`.
+        A context manager that yields the succeeded `nace_sdk.DocumentJob` with its result.
     :raises nace_sdk.NaceError:
-        If the upload, the create or the wait fails, or the job did not succeed.
+        If the upload, the create or the wait fails, the job did not succeed, or it succeeded without a result.
     :raises OSError:
         If a local source cannot be read.
     :raises ValueError:
@@ -73,11 +110,7 @@ def document_job(
             job_source = uploaded.as_source()
         job = getattr(client.documents, operation)(job_source, wait_seconds=60, **options)
         job_id = job.job_id
-        if not job.is_terminal:
-            job = client.jobs.wait(job_id, timeout=job_timeout, raise_on_failure=False)
-        if job.status != "succeeded":
-            raise nace_sdk.NaceJobFailedError(job)
-        yield job
+        yield finished_job(client, job, job_timeout)
     finally:
         if job_id is not None:
             try:
@@ -205,6 +238,47 @@ def convert_sources(
     return [document for batch in batches for document in batch]
 
 
+def _safe_source_label(source: str | Path | ByteStream) -> str:
+    """
+    A label for a source that is safe to log: no file bytes, no signed query string.
+
+    An `https://` source is shown without its query and fragment, a local path as given, and a `ByteStream` by the
+    file name NDI would upload it under, or as `ByteStream` when that name cannot be told.
+
+    :param source:
+        The source to label.
+    :returns:
+        The label for the log.
+    """
+    if isinstance(source, str):
+        if source.startswith("https://"):
+            parts = urlsplit(source)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        return source
+    if isinstance(source, Path):
+        return str(source)
+    try:
+        return upload_file_name(source)
+    except ValueError:
+        return "ByteStream"
+
+
+def _without_full_source(text: str, source: str | Path | ByteStream) -> str:
+    """
+    Replaces the full `https://` source string in `text` with its safe label, so a signed query stays out of logs.
+
+    :param text:
+        The error text about to be logged.
+    :param source:
+        The source the error is about.
+    :returns:
+        The text with every occurrence of the full source replaced by its label.
+    """
+    if isinstance(source, str) and source.startswith("https://"):
+        return text.replace(source, _safe_source_label(source))
+    return text
+
+
 def _convert_one(
     convert: Callable[[nace_sdk.NaceClient, str | Path | ByteStream, dict[str, Any]], list[Document]],
     client: nace_sdk.NaceClient,
@@ -217,7 +291,11 @@ def _convert_one(
     except (nace_sdk.NaceError, OSError, ValueError) as error:
         if not raise_on_failure:
             failure = readable_error(error, "Nace") if isinstance(error, nace_sdk.NaceError) else error
-            logger.warning("Converting source {source} failed: {error}. Skipping it.", source=source, error=failure)
+            logger.warning(
+                "Converting source {source} failed: {error}. Skipping it.",
+                source=_safe_source_label(source),
+                error=_without_full_source(str(failure), source),
+            )
             return []
         if isinstance(error, nace_sdk.NaceError):
             raise readable_error(error, "Nace") from error

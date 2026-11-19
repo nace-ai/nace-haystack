@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 import tempfile
 from pathlib import Path
 from typing import Any, Literal
@@ -216,13 +215,10 @@ class NaceDocumentConverter:
         """
         content_url = document.get("content_url")
         if content_url and any(item.get("target") == "document_content" for item in truncations):
-            descriptor, name = tempfile.mkstemp(suffix=".md")
-            os.close(descriptor)
-            try:
-                client.jobs.download(job.job_id, content_url, name)
-                return Path(name).read_text(encoding="utf-8")
-            finally:
-                os.unlink(name)
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+                target = Path(folder) / "content.md"
+                client.jobs.download(job.job_id, content_url, target)
+                return target.read_text(encoding="utf-8")
         raise nace_sdk.NaceError(TRUNCATED_RESULT_MESSAGE)
 
     @component.output_types(documents=list[Document])

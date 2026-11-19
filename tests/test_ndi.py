@@ -21,9 +21,19 @@ FILE_ID = "22222222-2222-2222-2222-222222222222"
 JOB_ID = "33333333-3333-3333-3333-333333333333"
 SEARCH_JOB_ID = "55555555-5555-5555-5555-555555555555"
 UPLOAD_URL = "https://uploads.example/uploads/1"
-FILE_URL = "https://files.example/full-markdown.md"
+CONTENT_PATH = f"/v1/documents/jobs/{JOB_ID}/document-content"
 MARKDOWN = "# Invoice INV-1042\n\nTotal: $284.00"
 FULL_MARKDOWN = MARKDOWN + "\n\nThe rest of the full parse result."
+ANSWER = "The total of invoice INV-1042 is $284.00."
+EVIDENCES = [
+    {"source_path": "invoices/invoice.html", "source_file_id": FILE_ID, "page": 3, "quote": "Total: $284.00"},
+    {
+        "source_path": "invoices/cover.html",
+        "source_file_id": FILE_ID,
+        "page": None,
+        "quote": "Invoice INV-1042",
+    },
+]
 JOB_ERROR = {"code": "cannot_read_file", "message": "The document service cannot read this file."}
 UPLOAD_JOB = {
     "job_id": "44444444-4444-4444-4444-444444444444",
@@ -40,12 +50,13 @@ def api_key(monkeypatch):
 
 
 class FakeNdi:
-    """Answers a full NDI flow: uploads and file downloads on *.example hosts, everything else at the base URL."""
+    """Answers a full NDI flow: uploads on the document service's *.example host, everything else at the base URL."""
 
-    def __init__(self, result=None, *, status="succeeded", output=None):
+    def __init__(self, result=None, *, status="succeeded", output=None, result_state=None):
         self.result = result
         self.status = status
         self.output = output
+        self.result_state = result_state
         self.requests: list[httpx.Request] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -62,8 +73,6 @@ class FakeNdi:
             )
         if request.url.host == "uploads.example":
             return httpx.Response(200, json=UPLOAD_JOB)
-        if request.url.host == "files.example":
-            return httpx.Response(200, text=FULL_MARKDOWN)
         if request.url.path in ("/v1/documents/parse", "/v1/documents/extract"):
             return httpx.Response(200, json=self._job(request.url.path))
         if request.url.path == f"/v1/workspaces/{WORKSPACE_ID}/automatic-search":
@@ -73,8 +82,8 @@ class FakeNdi:
             else:
                 job["error"] = JOB_ERROR
             return httpx.Response(200, json=job)
-        if request.url.path == f"/v1/documents/jobs/{JOB_ID}/document_content":
-            return httpx.Response(200, json={"url": FILE_URL, "expires_at": 1770000000})
+        if request.url.path == CONTENT_PATH:
+            return httpx.Response(200, text=FULL_MARKDOWN, headers={"content-type": "text/markdown"})
         if request.method == "DELETE" and request.url.path in (
             f"/v1/documents/jobs/{JOB_ID}",
             f"/v1/documents/jobs/{SEARCH_JOB_ID}",
@@ -91,9 +100,13 @@ class FakeNdi:
         return httpx.Response(404, json={"error": {"message": f"unexpected {request.method} {request.url}"}})
 
     def _job(self, path: str) -> dict:
+        kind = path.rsplit("/", 1)[-1]
         if self.status != "succeeded":
-            return {"job_id": JOB_ID, "kind": path.rsplit("/", 1)[-1], "status": self.status, "error": JOB_ERROR}
-        return {"job_id": JOB_ID, "kind": path.rsplit("/", 1)[-1], "status": "succeeded", "result": self.result}
+            return {"job_id": JOB_ID, "kind": kind, "status": self.status, "error": JOB_ERROR}
+        job = {"job_id": JOB_ID, "kind": kind, "status": "succeeded", "result": self.result}
+        if self.result_state is not None:
+            job["result_state"] = self.result_state
+        return job
 
     def sent(self, method: str, path: str) -> list[httpx.Request]:
         return [request for request in self.requests if request.method == method and request.url.path == path]
@@ -192,7 +205,7 @@ def test_converter_page_chunking_returns_one_document_per_chunk():
 
 
 @pytest.mark.usefixtures("api_key")
-def test_converter_failed_job_skips_or_raises_and_still_cleans_up(tmp_path):
+def test_converter_failed_job_skips_or_raises_and_still_cleans_up(tmp_path, caplog):
     source = _invoice(tmp_path)
 
     skipping = FakeNdi(status="failed")
@@ -208,6 +221,26 @@ def test_converter_failed_job_skips_or_raises_and_still_cleans_up(tmp_path):
     assert len(raising.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
     assert len(raising.sent("DELETE", f"/v1/documents/workspaces/{WORKSPACE_ID}/files/{FILE_ID}")) == 1
 
+    # A failed https source is logged by its URL without the query, so a signed query string stays out of the log.
+    url = "https://docs.example/invoice.html?sig=secret-signature"
+    skipping_url = FakeNdi(status="failed")
+    converter = _with_fake_client(NaceDocumentConverter(max_retries=0), skipping_url)
+    assert converter.run(sources=[url])["documents"] == []
+    assert "https://docs.example/invoice.html" in caplog.text
+    assert "secret-signature" not in caplog.text
+    assert len(skipping_url.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
+
+
+@pytest.mark.usefixtures("api_key")
+def test_converter_succeeded_job_without_result_raises_and_still_cleans_up():
+    api = FakeNdi(None, result_state="not_retained")
+    converter = _with_fake_client(NaceDocumentConverter(max_retries=0, raise_on_failure=True), api)
+
+    with pytest.raises(nace_sdk.NaceError, match=rf"{JOB_ID}.*not_retained"):
+        converter.run(sources=["https://docs.example/invoice.html"])
+
+    assert len(api.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
+
 
 @pytest.mark.usefixtures("api_key")
 def test_converter_truncated_result_fetches_the_full_markdown():
@@ -216,7 +249,7 @@ def test_converter_truncated_result_fetches_the_full_markdown():
             "document": {
                 "markdown": "# Invoice INV-10",
                 "page_count": 3,
-                "content_url": f"/v1/documents/jobs/{JOB_ID}/document_content",
+                "content_url": CONTENT_PATH,
             },
             "disclosures": [{"code": "content_truncated", "target": "document_content", "message": "over 1 MiB"}],
         }
@@ -226,11 +259,11 @@ def test_converter_truncated_result_fetches_the_full_markdown():
     result = converter.run(sources=["https://docs.example/invoice.html"])
 
     assert result["documents"][0].content == FULL_MARKDOWN
-    # The full Markdown came through its signed storage link, fetched without the API key.
-    assert api.requests[1].url.path == f"/v1/documents/jobs/{JOB_ID}/document_content"
-    download = api.requests[2]
-    assert download.url.host == "files.example"
-    assert "authorization" not in download.headers
+    # The full Markdown is the job's own file: fetched from the base URL origin, with the API key.
+    fetch = api.requests[1]
+    assert (fetch.method, fetch.url.path) == ("GET", CONTENT_PATH)
+    assert fetch.url.host == "console.nace.ai"
+    assert fetch.headers["authorization"] == "Bearer fake-nace-key"
     assert len(api.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
 
 
@@ -268,21 +301,24 @@ def test_extractor_returns_data_and_fields_and_cleans_up(tmp_path):
     assert len(api.sent("DELETE", f"/v1/documents/workspaces/{WORKSPACE_ID}/files/{FILE_ID}")) == 1
 
 
-@pytest.mark.usefixtures("api_key")
-def test_search_returns_one_answer_with_unscored_evidence_and_deletes_the_job():
-    output = {
-        "answer": "The total of invoice INV-1042 is $284.00.",
-        "confidence": "certain",
-        "evidences": [
-            {"source_path": "invoices/invoice.html", "source_file_id": FILE_ID, "page": 3, "quote": "Total: $284.00"},
-            {
-                "source_path": "invoices/cover.html",
-                "source_file_id": FILE_ID,
-                "page": None,
-                "quote": "Invoice INV-1042",
+@pytest.mark.parametrize(
+    "output",
+    [
+        {"answer": ANSWER, "confidence": "certain", "evidences": EVIDENCES},
+        {
+            "result_type": "automatic_agent",
+            "answer": {
+                "answer": ANSWER,
+                "confidence": "certain",
+                "evidences": EVIDENCES,
+                "structured_answer": {"total": "$284.00"},
             },
-        ],
-    }
+        },
+    ],
+    ids=["fact", "agent"],
+)
+@pytest.mark.usefixtures("api_key")
+def test_search_returns_one_answer_with_unscored_evidence_and_deletes_the_job(output):
     api = FakeNdi(output=output)
     search = _with_fake_client(NaceWorkspaceSearch(workspace_id=WORKSPACE_ID, max_retries=0), api)
 
@@ -293,7 +329,7 @@ def test_search_returns_one_answer_with_unscored_evidence_and_deletes_the_job():
     assert create.url.params["wait_seconds"] == "60"
     assert json.loads(create.content) == {"query": "What is the total of invoice INV-1042?", "mode": "auto"}
     (answer,) = result["answers"]
-    assert answer.data == output["answer"]
+    assert answer.data == ANSWER
     assert answer.query == "What is the total of invoice INV-1042?"
     assert answer.meta == {"confidence": "certain"}
     assert [document.content for document in answer.documents] == ["Total: $284.00", "Invoice INV-1042"]

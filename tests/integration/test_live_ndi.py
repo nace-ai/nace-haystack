@@ -7,9 +7,10 @@
 import os
 import uuid
 
-import nace_sdk
 import pytest
+from haystack.utils import Secret
 
+from haystack_integrations.common.nace.client import client_options, make_client
 from haystack_integrations.components.connectors.nace import NaceWorkspaceSearch
 from haystack_integrations.components.converters.nace import NaceDocumentConverter
 from haystack_integrations.components.extractors.nace import NaceDocumentExtractor
@@ -58,7 +59,8 @@ def test_extractor_live(invoice):
 
 
 def test_workspace_search_live(invoice):
-    with nace_sdk.NaceClient() as client:
+    client = make_client(client_options(Secret.from_env_var("NACE_API_KEY"), None, None, None))
+    try:
         name = f"nace-haystack-ndi-tests-{uuid.uuid4().hex[:8]}"
         workspace = client.workspaces.create(name=name)
         workspace_id = str(workspace.workspace_id)
@@ -78,3 +80,5 @@ def test_workspace_search_live(invoice):
             assert len(answer.documents) >= 1
         finally:
             client.workspaces.delete(workspace_id, confirm_name=name)
+    finally:
+        client.close()

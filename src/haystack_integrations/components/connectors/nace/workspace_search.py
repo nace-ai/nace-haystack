@@ -10,6 +10,7 @@ from haystack.dataclasses import GeneratedAnswer
 from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import bind_credentials, client_options, make_client
+from haystack_integrations.common.nace.documents import finished_job
 from haystack_integrations.common.nace.errors import readable_error
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ class NaceWorkspaceSearch:
             - `answers`: One `GeneratedAnswer`: the answer, the query it answers, and one Document per evidence
               quote, without scores.
         :raises nace_sdk.NaceError:
-            If the search or the wait for it fails, or the job did not succeed.
+            If the search or the wait for it fails, or the job did not succeed or has no result.
         """
         self.warm_up()
         assert self._client is not None  # noqa: S101  # mypy: the client is created by warm_up above
@@ -161,16 +162,15 @@ class NaceWorkspaceSearch:
                 wait_seconds=60,
             )
             job_id = job.job_id
-            if not job.is_terminal:
-                job = client.jobs.wait(job_id, timeout=self.job_timeout, raise_on_failure=False)
-            if job.status != "succeeded":
-                raise nace_sdk.NaceJobFailedError(job)
+            job = finished_job(client, job, self.job_timeout)
             output = (job.result or {}).get("output") or {}
+            # An agent-routed search answers with the answer, its confidence and its evidences inside `output.answer`.
+            body = output["answer"] if isinstance(output.get("answer"), dict) else output
             answer = GeneratedAnswer(
-                data=output.get("answer") or "",
+                data=body.get("answer") or "",
                 query=query,
-                documents=self._evidence_documents(output.get("evidences") or []),
-                meta={"confidence": output.get("confidence")},
+                documents=self._evidence_documents(body.get("evidences") or []),
+                meta={"confidence": body.get("confidence")},
             )
             return {"answers": [answer]}
         except nace_sdk.NaceError as error:
