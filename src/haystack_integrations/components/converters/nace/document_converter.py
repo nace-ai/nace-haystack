@@ -26,9 +26,11 @@ class NaceDocumentConverter:
     """
     Converts files into Markdown Documents with Nace Document Intelligence (NDI) Parse.
 
-    A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. Files are
-    uploaded into your Nace workspace for the parse and deleted again after it, together with the parse job; a URL
-    source is sent as given. NDI runs in the Nace cloud, so the source is sent there.
+    A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. An `https://`
+    source must end in a file name with an extension (for example `.pdf`), because NDI picks its parser from it; a
+    URL without one is refused. Files are uploaded into your Nace workspace for the parse and deleted again after
+    it, together with the parse job; a URL source is sent as given. NDI runs in the Nace cloud, so the source is
+    sent there.
 
     With `chunking=None` (the default) each source becomes one Document whose content is the full Markdown NDI
     produced. With `chunking="page"` or `chunking="section"`, each chunk becomes its own Document, with `chunk_id`

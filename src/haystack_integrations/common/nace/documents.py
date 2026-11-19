@@ -132,8 +132,8 @@ def upload_file_name(bytestream: ByteStream) -> str:
     The file name an uploaded `ByteStream` is given, so NDI can pick its parser from its extension.
 
     The name is the base name of `meta["file_path"]`, else `meta["file_name"]`, else `"document"`. A name without an
-    extension gets the extension of the stream's MIME type; if there is still no extension, the file type cannot be
-    told and the source is refused.
+    extension gets the extension of the stream's MIME type, without the MIME type's parameters such as
+    `; charset=utf-8`; if there is still no extension, the file type cannot be told and the source is refused.
 
     :param bytestream:
         The stream to name.
@@ -146,7 +146,8 @@ def upload_file_name(bytestream: ByteStream) -> str:
     file_path = str(meta.get("file_path") or "")
     name = os.path.basename(file_path) if file_path else str(meta.get("file_name") or "document")
     if not Path(name).suffix:
-        name += mimetypes.guess_extension(bytestream.mime_type or "") or ""
+        mime_type = (bytestream.mime_type or "").partition(";")[0].strip()
+        name += mimetypes.guess_extension(mime_type) or ""
     if not Path(name).suffix:
         msg = (
             f"Cannot tell the file type of {name!r}: the source has no file extension, and its MIME type "
@@ -244,8 +245,9 @@ def _safe_source_label(source: str | Path | ByteStream) -> str:
     A label for a source that is safe to log: no file bytes, no user info, no signed query string.
 
     An `https://` source is shown without its user info, query and fragment, a local path as given, and a
-    `ByteStream` by the file name NDI would upload it under, or as `ByteStream` when that name cannot be told. The
-    label never raises: an `https://` source that cannot be parsed is shown as `https URL`.
+    `ByteStream` by the file name NDI would upload it under, or as `ByteStream` when that name cannot be told. A
+    source of any other type is shown by its type name. The label never raises: an `https://` source that cannot be
+    parsed is shown as `https URL`.
 
     :param source:
         The source to label.
@@ -267,27 +269,32 @@ def _safe_source_label(source: str | Path | ByteStream) -> str:
         return source
     if isinstance(source, Path):
         return str(source)
+    if not isinstance(source, ByteStream):
+        return type(source).__name__
     try:
         return upload_file_name(source)
     except ValueError:
         return "ByteStream"
 
 
-_URL_IN_TEXT = re.compile(r"https?://\S+")
+_URL_IN_TEXT = re.compile(r"https?://[^\s\"'<>,\\]+", re.IGNORECASE)
+_AUTHORITY_SECRETS = re.compile(r"[^\s/\"'@]+:[^\s/\"'@]+@")
 
 
 def _without_url_secrets(text: str) -> str:
     """
     Removes user info, query and fragment from every http(s) URL in `text`, for the log line only.
 
-    A URL the error text clipped loses its clipped part too: `https://host/a.pdf?sig=ab...` becomes
-    `https://host/a.pdf`, and `https://user:pw@host/a.pdf?sig=abc#x` becomes `https://host/a.pdf`. Raised
+    The scheme matches in any case, and a URL ends at whitespace and at `"`, `'`, `<`, `>`, `,` and `\\`, so two
+    URLs in compact JSON are scrubbed as two. A URL the error text clipped loses its clipped part too:
+    `https://host/a.pdf?sig=ab...` becomes `https://host/a.pdf`, and `https://user:pw@host/a.pdf?sig=abc#x` becomes
+    `https://host/a.pdf`. A `user:password@` the text shows without a scheme is removed after that. Raised
     exceptions keep the URLs they were built with.
 
     :param text:
         The error text about to be logged.
     :returns:
-        The text with every http(s) URL reduced to its scheme, host and path.
+        The text with every http(s) URL reduced to its scheme, host and path, and no `user:password@` left.
     """
 
     def scrub(match: re.Match[str]) -> str:
@@ -296,7 +303,7 @@ def _without_url_secrets(text: str) -> str:
         authority, slash, path = rest.partition("/")
         return f"{scheme}://{authority.rpartition('@')[2]}{slash}{path}"
 
-    return _URL_IN_TEXT.sub(scrub, text)
+    return _AUTHORITY_SECRETS.sub("", _URL_IN_TEXT.sub(scrub, text))
 
 
 def _convert_one(

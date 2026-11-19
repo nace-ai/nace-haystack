@@ -224,9 +224,11 @@ Three components bring [Nace Document Intelligence](https://console.nace.ai/docs
 files into Markdown, fill a JSON Schema from them, and answer questions over a workspace of ingested files. NDI is
 cloud only: every source you pass is sent to the Nace API.
 
-A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. Local files are
-uploaded into your Nace workspace for the job; after each run, the uploaded file and the job are deleted again, also
-when the job fails. Zero-retention accounts must use `https://` URL sources, because their NDI refuses an upload.
+A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. An `https://`
+source must end in a file name with an extension (for example `.pdf`), because NDI picks its parser from it; a URL
+without one is refused. Local files are uploaded into your Nace workspace for the job; after each run, the uploaded
+file and the job are deleted again, also when the job fails. Zero-retention accounts must use `https://` URL
+sources, because their NDI refuses an upload.
 
 `NaceDocumentConverter` turns each file into one Document with the Markdown NDI produced, or into one Document per
 page or section with `chunking=`:

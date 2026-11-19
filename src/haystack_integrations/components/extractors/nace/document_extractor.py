@@ -22,9 +22,11 @@ class NaceDocumentExtractor:
     """
     Fills a JSON Schema from each file with Nace Document Intelligence (NDI) Extract, as one Document per source.
 
-    A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. Files are
-    uploaded into your Nace workspace for the extraction and deleted again after it, together with the extract job;
-    a URL source is sent as given. NDI runs in the Nace cloud, so the source is sent there.
+    A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. An `https://`
+    source must end in a file name with an extension (for example `.pdf`), because NDI picks its parser from it; a
+    URL without one is refused. Files are uploaded into your Nace workspace for the extraction and deleted again
+    after it, together with the extract job; a URL source is sent as given. NDI runs in the Nace cloud, so the
+    source is sent there.
 
     Each Document's `content` is the extracted `data` as JSON, and `meta["extraction"]` keeps that `data` together
     with NDI's per-field report: each field's `value`, `status` and `confidence`. Sources run on up to `max_workers`

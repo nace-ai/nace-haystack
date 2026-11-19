@@ -9,8 +9,10 @@ import json
 import httpx
 import nace_sdk
 import pytest
+from haystack.dataclasses import ByteStream
 
 from haystack_integrations.common.nace.client import CLIENT_NAME, _prepare_request, client_options, make_client
+from haystack_integrations.common.nace.documents import upload_file_name
 from haystack_integrations.components.connectors.nace import NaceWorkspaceSearch
 from haystack_integrations.components.converters.nace import NaceDocumentConverter
 from haystack_integrations.components.extractors.nace import NaceDocumentExtractor
@@ -36,7 +38,13 @@ EVIDENCES = [
     },
 ]
 SIGNED_URL = "https://reader:hunter2@docs.example/invoice.html?sig=secret-signature"
-JOB_ERROR = {"code": "cannot_read_file", "message": f"The document service cannot read this file: {SIGNED_URL}."}
+UPPERCASE_URL = "HTTPS://reader:hunter3@docs.example/invoice.html?sig=uppercase-secret"
+BARE_AUTHORITY = "alice:hunter3@docs.example"
+JOB_ERROR = {
+    "code": "cannot_read_file",
+    "message": f"The document service cannot read this file: {SIGNED_URL}. Retried as {UPPERCASE_URL} and "
+    f"{BARE_AUTHORITY}.",
+}
 UPLOAD_JOB = {
     "job_id": "44444444-4444-4444-4444-444444444444",
     "kind": "file_upload",
@@ -156,6 +164,8 @@ def test_converter_local_source_uploads_parses_and_cleans_up(tmp_path):
     # The job and the uploaded file were deleted after the run.
     assert len(api.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
     assert len(api.sent("DELETE", f"/v1/documents/workspaces/{WORKSPACE_ID}/files/{FILE_ID}")) == 1
+    # A stream named only by its MIME type gets its extension from it, with the MIME type's parameters ignored.
+    assert upload_file_name(ByteStream(data=b"x", mime_type="text/html; charset=utf-8")).endswith((".html", ".htm"))
 
 
 @pytest.mark.usefixtures("api_key")
@@ -223,20 +233,27 @@ def test_converter_failed_job_skips_or_raises_and_still_cleans_up(tmp_path, capl
     assert len(raising.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
     assert len(raising.sent("DELETE", f"/v1/documents/workspaces/{WORKSPACE_ID}/files/{FILE_ID}")) == 1
 
-    # A malformed https source is skipped with a warning, and the other sources still convert.
+    # Raw bytes, a source type Haystack converters refuse, and a malformed https source are skipped with warnings,
+    # and the valid source still converts.
     mixed = FakeNdi({"document": {"markdown": MARKDOWN, "page_count": 1}, "disclosures": []})
     converter = _with_fake_client(NaceDocumentConverter(max_retries=0), mixed)
-    result = converter.run(sources=["https://[broken/invoice.pdf", "https://docs.example/invoice.html"])
+    result = converter.run(
+        sources=[b"<h1>raw bytes</h1>", "https://[broken/invoice.pdf", "https://docs.example/invoice.html"]
+    )
     assert [document.content for document in result["documents"]] == [MARKDOWN]
-    assert "https URL" in caplog.text
+    assert "Converting source bytes failed" in caplog.text
+    assert "Converting source https URL failed" in caplog.text
 
-    # A failed signed https source is logged without its user info or its query, also when the error quotes it.
+    # A failed signed https source is logged without its user info or its query, also when the error quotes it
+    # signed, upper-case, or bare without a scheme.
     skipping_url = FakeNdi(status="failed")
     converter = _with_fake_client(NaceDocumentConverter(max_retries=0), skipping_url)
     assert converter.run(sources=[SIGNED_URL])["documents"] == []
     assert "https://docs.example/invoice.html" in caplog.text
     assert "hunter2" not in caplog.text
+    assert "hunter3" not in caplog.text
     assert "secret-signature" not in caplog.text
+    assert "uppercase-secret" not in caplog.text
     assert len(skipping_url.sent("DELETE", f"/v1/documents/jobs/{JOB_ID}")) == 1
 
 
