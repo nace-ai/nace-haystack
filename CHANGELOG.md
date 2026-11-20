@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Added
 
 - `NaceDocumentConverter`: converts file paths, `ByteStream` sources or `https://` URL sources into Markdown
