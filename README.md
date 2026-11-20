@@ -218,6 +218,74 @@ python -m jupyterlab notebooks/nace_haystack_cookbook.ipynb
 Select the virtual environment's Python kernel. The notebook reads sample files from the checkout; run it from the
 repository root or the `notebooks/` directory.
 
+## Documents (NDI)
+
+Three components bring [Nace Document Intelligence](https://console.nace.ai/docs) (NDI) to Haystack: they parse
+files into Markdown, fill a JSON Schema from them, and answer questions over a workspace of ingested files. NDI is
+cloud only: every source you pass is sent to the Nace API.
+
+A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. An `https://`
+source must end in a file name with an extension (for example `.pdf`), because NDI picks its parser from it; a URL
+without one is refused. Local files are uploaded into your Nace workspace for the job; after each run, the uploaded
+file and the job are deleted again, also when the job fails. Zero-retention accounts must use `https://` URL
+sources, because their NDI refuses an upload.
+
+One case stands outside that cleanup: when NDI answers a create with `503 job_pending`, the job may have been
+accepted while its id is not known, so it cannot be deleted. The raised error then carries the create's
+idempotency key: send the same request to `nace-sdk` with it to resume the job, and delete the job it returns.
+
+A create whose response is lost — the request times out after NDI accepted it — can equally leave a job running,
+and be billed once. `nace-sdk` mints a fresh idempotency key for every call and its timeout errors carry none, so
+such a job cannot be resumed by key: find it with `client.jobs.list()` from `nace-sdk`, or in the Nace console, and
+delete it there.
+
+The metadata of a URL source keeps only the URL's scheme, host and path: the signature of a presigned URL never
+reaches a serialized Document. Errors never expose the API key, also when a gateway echoes it back, and the three
+components refuse a `job_timeout` that is not a finite number greater than 0.
+
+The `job_timeout` of the three components bounds the wait for a job: a create's hold and request timeout, and every
+job read's hold and HTTP timeout, are capped to the budget left where the SDK allows (the SDK enforces a minimum create hold and HTTP timeout, so with a very small budget the first request can outlast it). The bound is best-effort: a request already in
+flight, an SDK retry, or the cleanup after a timeout can run slightly past the deadline.
+
+`NaceDocumentConverter` turns each file into one Document with the Markdown NDI produced, or into one Document per
+page or section with `chunking=`:
+
+```python
+from haystack_integrations.components.converters.nace import NaceDocumentConverter
+
+converter = NaceDocumentConverter()
+result = converter.run(sources=["invoice.html"])
+print(result["documents"][0].content)
+# '# Invoice INV-1042 ...'
+```
+
+`NaceDocumentExtractor` fills a JSON Schema from each file. The Document's `content` is the extracted data as JSON,
+and `meta["extraction"]` keeps it with NDI's per-field report:
+
+```python
+from haystack_integrations.components.extractors.nace import NaceDocumentExtractor
+
+extractor = NaceDocumentExtractor(
+    schema={"type": "object", "properties": {"invoice_number": {"type": "string"}}, "required": ["invoice_number"]}
+)
+result = extractor.run(sources=["invoice.html"])
+print(result["documents"][0].meta["extraction"]["data"])
+# {'invoice_number': 'INV-1042'}
+```
+
+`NaceWorkspaceSearch` answers one question over a workspace's ingested files with Drex Search. It is not a retriever
+and returns no scores: it returns a `GeneratedAnswer` whose documents are the evidence quotes the answer cites. The
+workspace must already exist and its files must be ingested, in the console or with nace-sdk:
+
+```python
+from haystack_integrations.components.connectors.nace import NaceWorkspaceSearch
+
+search = NaceWorkspaceSearch(workspace_id="11111111-1111-1111-1111-111111111111")
+result = search.run(query="What is the total of invoice INV-1042?")
+print(result["answers"][0].data, result["answers"][0].documents[0].content)
+# 'The total of invoice INV-1042 is $284.00.' 'Total: $284.00'
+```
+
 ## Models
 
 The default model is `drex-max-v1.1` (Drex Max v1.1), which reads text, JSON and images. The default moves to the

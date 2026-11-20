@@ -18,20 +18,75 @@ MAX_MESSAGE_CHARS = 500
 
 _IMAGE_PATH = re.compile(r"^images\.(\d+)")
 
+# What a value the error text held is replaced with, so a reader can tell something was removed.
+_REDACTED = "[redacted]"
 
-def readable_error(error: nace_sdk.NaceError, provider: str, *, image_types: Sequence[str] = ()) -> nace_sdk.NaceError:
+
+def redact_api_key(error: nace_sdk.NaceError, api_key: str | None) -> nace_sdk.NaceError:
+    """
+    Returns `error` with the API key value removed from its message and body.
+
+    A gateway or proxy can answer a failed request by echoing the `Authorization` value it got, which
+    would put the key into logs and raised errors. The returned copy keeps the error's class, status,
+    headers, endpoint and idempotency key, so branching on them still works. An error that is not an
+    HTTP error response, that holds the key nowhere, or a key that is unknown, gives the error back
+    as it is.
+
+    :param error: The error nace-sdk raised.
+    :param api_key: The API key value the request carried, or `None` when it is unknown.
+    :returns: The error, or a copy of it without the API key value.
+    """
+    if (
+        not api_key
+        or not isinstance(error, nace_sdk.NaceAPIError)
+        or isinstance(error, nace_sdk.NaceAPIResponseValidationError)
+    ):
+        return error
+    message = error.message
+    if isinstance(message, str) and api_key in message:
+        message = message.replace(api_key, _REDACTED)
+    body = _without_api_key(error.body, api_key)
+    if message == error.message and body == error.body:
+        return error
+    redacted = type(error)(error.status, body, error.headers, message=message, endpoint=error.endpoint)
+    redacted.idempotency_key = error.idempotency_key
+    return redacted
+
+
+def _without_api_key(value: Any, api_key: str) -> Any:
+    # The key value can sit at any depth of a JSON error body, so every string in it is cleaned.
+    if isinstance(value, str):
+        return value.replace(api_key, _REDACTED) if api_key in value else value
+    if isinstance(value, dict):
+        return {name: _without_api_key(item, api_key) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_without_api_key(item, api_key) for item in value]
+    return value
+
+
+def readable_error(
+    error: nace_sdk.NaceError,
+    provider: str,
+    *,
+    image_types: Sequence[str] = (),
+    api_key: str | None = None,
+) -> nace_sdk.NaceError:
     """
     Rewrites an API error so its message says who refused the request and what to change.
 
     The result is an instance of the same nace-sdk class, so `except nace_sdk.NaceError` (or a narrower class such
     as `nace_sdk.NaceRateLimitError`) still catches it, and its `status`, `body`, `issues`, `request_id` and
-    `idempotency_key` are kept. A 404 or 405 names the URL, which is how a wrong base URL shows.
+    `idempotency_key` are kept. A 404 or 405 names the URL, which is how a wrong base URL shows. When the API key
+    value is given, it is first removed from the error's message and body, so an error that echoes the
+    `Authorization` value cannot leak the key.
 
     :param error: The error nace-sdk raised.
     :param provider: Who answered: `"Drex"`, or `"OpenRouter"` on that backend.
     :param image_types: The MIME type of each image sent, in order, so a refused PDF can be named.
+    :param api_key: The API key value the request carried, or `None` to leave the error as it is.
     :returns: The readable error, or `error` itself if it isn't an HTTP error response.
     """
+    error = redact_api_key(error, api_key)
     if not isinstance(error, nace_sdk.NaceAPIError) or isinstance(error, nace_sdk.NaceAPIResponseValidationError):
         return error
     message, found = _unwrap(error.message) if error.message else (None, [])
