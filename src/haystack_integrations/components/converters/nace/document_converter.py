@@ -12,7 +12,13 @@ from haystack.dataclasses import ByteStream
 from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import bind_credentials, client_options, make_client
-from haystack_integrations.common.nace.documents import convert_sources, document_job, job_source, merged_meta
+from haystack_integrations.common.nace.documents import (
+    check_job_timeout,
+    convert_sources,
+    document_job,
+    job_source,
+    merged_meta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +35,16 @@ class NaceDocumentConverter:
     A source is a file path, a `ByteStream`, or an `https://` URL string, which NDI downloads itself. An `https://`
     source must end in a file name with an extension (for example `.pdf`), because NDI picks its parser from it; a
     URL without one is refused. Files are uploaded into your Nace workspace for the parse and deleted again after
-    it, together with the parse job; a URL source is sent as given. NDI runs in the Nace cloud, so the source is
-    sent there.
+    it, together with the parse job; a URL source is sent to NDI as given, but the Document's `url` metadata keeps
+    only its scheme, host and path, so the signature of a presigned URL never reaches a serialized Document. NDI
+    runs in the Nace cloud, so the source is sent there.
 
     With `chunking=None` (the default) each source becomes one Document whose content is the full Markdown NDI
     produced. With `chunking="page"` or `chunking="section"`, each chunk becomes its own Document, with `chunk_id`
     and, for page chunks, `page_number` in its metadata. A result NDI cut at 1 MiB is never returned as the full
-    content: the full Markdown of an unchunked parse is fetched instead, and every other cut result raises.
+    content: the full Markdown of an unchunked parse is fetched instead, and every other cut result raises. A
+    succeeded result without the Markdown, without the chunks a `chunking` asked for, or with a chunk that is not an
+    object with content, also raises, instead of returning an empty Document or dropping the source.
 
     Sources run on up to `max_workers` threads, in the order of `sources`. A source that fails is skipped with a
     warning, or raises its readable error when `raise_on_failure` is `True`.
@@ -96,14 +105,12 @@ class NaceDocumentConverter:
         :param store_full_path:
             If `False`, only the base name of a local file is stored in the Document metadata.
         :raises ValueError:
-            If `max_workers` is smaller than 1 or `job_timeout` is not greater than 0.
+            If `max_workers` is smaller than 1 or `job_timeout` is not a finite number greater than 0.
         """
         if max_workers < 1:
             msg = f"`max_workers` must be at least 1, got {max_workers}."
             raise ValueError(msg)
-        if job_timeout <= 0:
-            msg = f"`job_timeout` must be greater than 0, got {job_timeout}."
-            raise ValueError(msg)
+        check_job_timeout(job_timeout)
 
         self.parse_mode = parse_mode
         self.chunking = chunking
@@ -170,9 +177,14 @@ class NaceDocumentConverter:
         self, client: nace_sdk.NaceClient, source: str | Path | ByteStream, meta_for_source: dict[str, Any]
     ) -> list[Document]:
         source_for_job, base_meta = job_source(source)
-        with document_job(client, "parse", source_for_job, self.job_timeout, **self._options()) as job:
+        with document_job(
+            client, "parse", source_for_job, self.job_timeout, api_key=self.api_key, **self._options()
+        ) as job:
             result = job.result or {}
             document = result.get("document") or {}
+            if not isinstance(document, dict):
+                msg = f"Parse job {job.job_id} succeeded without a parse document in its result."
+                raise nace_sdk.NaceError(msg)
             meta = merged_meta(base_meta, meta_for_source, self.store_full_path)
             if document.get("page_count") is not None:
                 meta["page_count"] = document["page_count"]
@@ -180,16 +192,35 @@ class NaceDocumentConverter:
             if self.chunking is None:
                 if truncations:
                     return [Document(content=self._full_markdown(client, job, document, truncations), meta=meta)]
-                return [Document(content=document.get("markdown") or "", meta=meta)]
+                if not isinstance(document.get("markdown"), str):
+                    msg = f"Parse job {job.job_id} succeeded without document Markdown in its result."
+                    raise nace_sdk.NaceError(msg)
+                return [Document(content=document["markdown"], meta=meta)]
             if truncations:
                 raise nace_sdk.NaceError(TRUNCATED_RESULT_MESSAGE)
+            chunks = document.get("chunks")
+            if not isinstance(chunks, list) or not chunks:
+                msg = (
+                    f"Parse job {job.job_id} succeeded without chunks in its result, although chunking was "
+                    "requested, so its source would be dropped."
+                )
+                raise nace_sdk.NaceError(msg)
             documents = []
-            for chunk in document.get("chunks") or []:
+            for number, chunk in enumerate(chunks, start=1):
+                content = chunk.get("content") if isinstance(chunk, dict) else None
+                if not isinstance(content, str) or not content:
+                    msg = (
+                        f"Parse job {job.job_id} succeeded, but chunk {number} of {len(chunks)} in its result is "
+                        "not an object with content."
+                    )
+                    raise nace_sdk.NaceError(msg)
                 chunk_meta = {**meta, "chunk_id": chunk.get("id")}
-                page = (chunk.get("location") or {}).get("page")
+                # A location that is not an object is ignored: it names no page, and the chunk's content is kept.
+                location = chunk.get("location")
+                page = location.get("page") if isinstance(location, dict) else None
                 if isinstance(page, int) and not isinstance(page, bool):
                     chunk_meta["page_number"] = page
-                documents.append(Document(content=chunk.get("content") or "", meta=chunk_meta))
+                documents.append(Document(content=content, meta=chunk_meta))
             return documents
 
     def _full_markdown(
@@ -263,6 +294,7 @@ class NaceDocumentConverter:
             meta,
             max_workers=self.max_workers,
             raise_on_failure=self.raise_on_failure,
+            api_key=self.api_key,
         )
         return {"documents": documents}
 

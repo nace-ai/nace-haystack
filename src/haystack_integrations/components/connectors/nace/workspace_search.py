@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import time
 from typing import Any, Literal
 
 import nace_sdk
@@ -10,8 +11,14 @@ from haystack.dataclasses import GeneratedAnswer
 from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import bind_credentials, client_options, make_client
-from haystack_integrations.common.nace.documents import finished_job
-from haystack_integrations.common.nace.errors import readable_error
+from haystack_integrations.common.nace.documents import (
+    capped_create_wait,
+    check_job_timeout,
+    finished_job,
+    is_job_pending,
+    job_pending_error,
+)
+from haystack_integrations.common.nace.errors import readable_error, redact_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +34,10 @@ class NaceWorkspaceSearch:
 
     This component is not a retriever: it returns no scores. It returns one `GeneratedAnswer` whose `documents` are
     the evidence quotes the answer cites, each with `source_path`, `source_file_id` and, when NDI names a page,
-    `page_number` in its metadata. The search job is deleted after every run.
+    `page_number` in its metadata. An agent that answers by listing documents, such as for "which invoices are over
+    $10,000", can return no answer text and a catalog table instead: its rows then sit in the answer's
+    `meta["catalog"]`, together with `meta["exhausted"]` when the agent ran out of steps and the answer is partial.
+    The search job is deleted after every run.
 
     ### Usage example
 
@@ -74,7 +84,10 @@ class NaceWorkspaceSearch:
             Maximum number of retries after a failed request attempt. If `None`, the SDK default of 2 is used.
         :param job_timeout:
             How long to wait for the search job to finish, in seconds.
+        :raises ValueError:
+            If `job_timeout` is not a finite number greater than 0.
         """
+        check_job_timeout(job_timeout)
         self.workspace_id = workspace_id
         self.mode = mode
         self.path_prefix = path_prefix
@@ -144,40 +157,72 @@ class NaceWorkspaceSearch:
         :returns:
             A dictionary with the following keys:
             - `answers`: One `GeneratedAnswer`: the answer, the query it answers, and one Document per evidence
-              quote, without scores.
+              quote, without scores. An answer that lists documents keeps the catalog table in its `meta`, with
+              `exhausted` when the answer is partial.
         :raises nace_sdk.NaceError:
-            If the search or the wait for it fails, or the job did not succeed or has no result.
+            If the search or the wait for it fails, the job did not succeed, has no result or holds no answer, or
+            the create ended `503 job_pending` (the error then carries the create's idempotency key).
         """
         self.warm_up()
         assert self._client is not None  # noqa: S101  # mypy: the client is created by warm_up above
 
         client = self._client
+        key = self.api_key.resolve_value()
         job_id: str | None = None
         try:
+            # The search job's wait budget starts at the create: its hold and request timeout, and every later
+            # read's hold and HTTP timeout, are capped to the budget left.
+            deadline = time.monotonic() + self.job_timeout
+            hold, request_timeout = capped_create_wait(deadline)
             job = client.search.automatic(
                 self.workspace_id,
                 query=query,
                 mode=self.mode,
                 path_prefix=self.path_prefix,
-                wait_seconds=60,
+                wait_seconds=hold,
+                timeout=request_timeout,
             )
             job_id = job.job_id
-            job = finished_job(client, job, self.job_timeout)
-            output = (job.result or {}).get("output") or {}
+            job = finished_job(client, job, deadline, self.job_timeout)
+            output = (job.result or {}).get("output")
+            if not isinstance(output, dict) or not output:
+                msg = f"Search job {job.job_id} succeeded without an answer output in its result."
+                raise nace_sdk.NaceError(msg)
             # An agent-routed search answers with the answer, its confidence and its evidences inside `output.answer`.
             body = output["answer"] if isinstance(output.get("answer"), dict) else output
+            catalog = output.get("catalog")
+            if not body.get("answer") and not isinstance(catalog, dict):
+                msg = (
+                    f"Search job {job.job_id} succeeded without an answer in its result: no answer text and no "
+                    "catalog table."
+                )
+                raise nace_sdk.NaceError(msg)
+            meta: dict[str, Any] = {"confidence": body.get("confidence")}
+            # An agent that answers by listing documents returns a catalog table instead of answer text, and can run
+            # out of steps first: both stay in the answer's meta, so no part of the answer is lost.
+            exhausted = body.get("exhausted")
+            if exhausted is not None:
+                meta["exhausted"] = exhausted
+            if isinstance(catalog, dict):
+                meta["catalog"] = catalog
             answer = GeneratedAnswer(
                 data=body.get("answer") or "",
                 query=query,
                 documents=self._evidence_documents(body.get("evidences") or []),
-                meta={"confidence": body.get("confidence")},
+                meta=meta,
             )
             return {"answers": [answer]}
         except nace_sdk.NaceError as error:
-            raise readable_error(error, "Nace") from error
+            if is_job_pending(error):
+                raise job_pending_error(error, "search") from error
+            raise readable_error(error, "Nace", api_key=key) from error
         finally:
             if job_id is not None:
                 try:
                     client.jobs.delete(job_id)
                 except nace_sdk.NaceError as error:
-                    logger.warning("Could not delete search job {job_id}: {error}", job_id=job_id, error=error)
+                    logger.warning(
+                        "Could not delete search job {job_id}: {error}",
+                        job_id=job_id,
+                        error=redact_api_key(error, key),
+                    )

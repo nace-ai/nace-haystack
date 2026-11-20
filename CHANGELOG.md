@@ -7,11 +7,28 @@
 - `NaceDocumentConverter`: converts file paths, `ByteStream` sources or `https://` URL sources into Markdown
   Documents with NDI Parse, optionally one Document per page or section, with parallel sources and per-source
   failure handling. Uploaded files and jobs are deleted after each run; a result NDI cut at 1 MiB is never returned
-  as the full content.
+  as the full content. A succeeded result without the Markdown, without the chunks a `chunking` asked for, or with
+  a chunk that is not an object with content, raises instead of returning an empty Document or dropping the source.
 - `NaceDocumentExtractor`: fills a JSON Schema from each source with NDI Extract, as one Document per source with
-  the extracted data as JSON in `content` and NDI's field report in `meta["extraction"]`.
+  the extracted data as JSON in `content` and NDI's field report in `meta["extraction"]`. A succeeded result
+  without `data` raises instead of producing a Document of `null`.
 - `NaceWorkspaceSearch`: answers one question over a Nace workspace's ingested files with Drex Search, as a
-  `GeneratedAnswer` whose documents are the cited evidence quotes, without scores.
+  `GeneratedAnswer` whose documents are the cited evidence quotes, without scores. An agent answer that lists
+  documents keeps its catalog rows in the answer's `meta["catalog"]`, with `meta["exhausted"]` when the agent ran
+  out of steps and the answer is partial. A succeeded search without an answer output raises instead of returning
+  an empty answer.
+- The wait for an NDI job is bounded by `job_timeout`: the create's hold and request timeout, and every job
+  read's hold and HTTP timeout, are capped to the budget left where the SDK allows (the SDK enforces a minimum create hold and HTTP timeout, so with a very small budget the first request can outlast it). The bound is best-effort: a request already in
+  flight, an SDK retry, or the cleanup after a timeout can run slightly past the deadline.
+- The NDI components never expose the API key value in an error or log, also when a gateway echoes the
+  `Authorization` value back, and the metadata of a URL source keeps only its scheme, host and path, so the
+  signature of a presigned URL never reaches a serialized Document. They refuse a `job_timeout` that is not a
+  finite number greater than 0.
+- A create that NDI answers with `503 job_pending` can stand for an accepted job whose id is not known. The raised
+  error keeps the create's idempotency key, so the job can be resumed with `nace-sdk` and then deleted; everything
+  whose id is known is still cleaned up. A create whose response is lost (a timeout after NDI accepted it) can
+  equally leave a job running: `nace-sdk`'s timeout errors carry no key, and such a job is found with
+  `client.jobs.list()`.
 
 ### Changed
 

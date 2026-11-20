@@ -12,7 +12,13 @@ from haystack.dataclasses import ByteStream
 from haystack.utils import Secret
 
 from haystack_integrations.common.nace.client import bind_credentials, client_options, make_client
-from haystack_integrations.common.nace.documents import convert_sources, document_job, job_source, merged_meta
+from haystack_integrations.common.nace.documents import (
+    check_job_timeout,
+    convert_sources,
+    document_job,
+    job_source,
+    merged_meta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +35,10 @@ class NaceDocumentExtractor:
     source is sent there.
 
     Each Document's `content` is the extracted `data` as JSON, and `meta["extraction"]` keeps that `data` together
-    with NDI's per-field report: each field's `value`, `status` and `confidence`. Sources run on up to `max_workers`
-    threads, in the order of `sources`. A source that fails is skipped with a warning, or raises its readable error
-    when `raise_on_failure` is `True`.
+    with NDI's per-field report: each field's `value`, `status` and `confidence`. A succeeded result without `data`
+    raises instead of producing a Document of `null`. Sources run on up to `max_workers` threads, in the order of
+    `sources`. A source that fails is skipped with a warning, or raises its readable error when `raise_on_failure`
+    is `True`.
 
     ### Usage example
 
@@ -94,8 +101,8 @@ class NaceDocumentExtractor:
         :param store_full_path:
             If `False`, only the base name of a local file is stored in the Document metadata.
         :raises ValueError:
-            If `schema` is not a non-empty dict, `max_workers` is smaller than 1 or `job_timeout` is not greater
-            than 0.
+            If `schema` is not a non-empty dict, `max_workers` is smaller than 1 or `job_timeout` is not a finite
+            number greater than 0.
         """
         if not isinstance(schema, dict) or not schema:
             msg = "`schema` must be a non-empty dict holding the JSON Schema of the fields to extract."
@@ -103,9 +110,7 @@ class NaceDocumentExtractor:
         if max_workers < 1:
             msg = f"`max_workers` must be at least 1, got {max_workers}."
             raise ValueError(msg)
-        if job_timeout <= 0:
-            msg = f"`job_timeout` must be greater than 0, got {job_timeout}."
-            raise ValueError(msg)
+        check_job_timeout(job_timeout)
 
         self.schema = schema
         self.instructions = instructions
@@ -169,11 +174,17 @@ class NaceDocumentExtractor:
         self, client: nace_sdk.NaceClient, source: str | Path | ByteStream, meta_for_source: dict[str, Any]
     ) -> list[Document]:
         source_for_job, base_meta = job_source(source)
-        with document_job(client, "extract", source_for_job, self.job_timeout, **self._options()) as job:
+        with document_job(
+            client, "extract", source_for_job, self.job_timeout, api_key=self.api_key, **self._options()
+        ) as job:
             result = job.result or {}
+            data = result.get("data")
+            if data is None:
+                msg = f"Extract job {job.job_id} succeeded without data in its result."
+                raise nace_sdk.NaceError(msg)
             meta = merged_meta(base_meta, meta_for_source, self.store_full_path)
-            meta["extraction"] = {"data": result.get("data"), "fields": result.get("fields")}
-            content = json.dumps(result.get("data"), ensure_ascii=False)
+            meta["extraction"] = {"data": data, "fields": result.get("fields")}
+            content = json.dumps(data, ensure_ascii=False)
             return [Document(content=content, meta=meta)]
 
     @component.output_types(documents=list[Document])
@@ -216,5 +227,6 @@ class NaceDocumentExtractor:
             meta,
             max_workers=self.max_workers,
             raise_on_failure=self.raise_on_failure,
+            api_key=self.api_key,
         )
         return {"documents": documents}
